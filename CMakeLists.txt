@@ -209,6 +209,7 @@ set(SOURCES
     src/physics/pfixedbox.cpp
     src/physics/pcylinder.cpp
     src/physics/pchassiscollision.cpp
+    src/physics/pcollisionsphere.cpp
     src/physics/pbox.cpp
     src/physics/pray.cpp
     src/net/robocup_ssl_server.cpp
@@ -235,6 +236,7 @@ set(HEADERS
     include/physics/pfixedbox.h
     include/physics/pcylinder.h
     include/physics/pchassiscollision.h
+    include/physics/pcollisionsphere.h
     include/physics/pbox.h
     include/physics/pray.h
     include/net/robocup_ssl_server.h

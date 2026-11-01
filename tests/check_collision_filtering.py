@@ -32,7 +32,7 @@ def main():
         relative = "../share/grSim/config"
     if not (binary.parent / relative / "Parsian.ini").is_file():
         raise AssertionError("Missing binary-relative robot configuration")
-    scenarios = ("spaced-11", "spaced-16", "crowded-11", "crowded-16",
+    scenarios = ("spaced-6", "crowded-6", "pushing-6", "spaced-11", "spaced-16", "crowded-11", "crowded-16",
                  "idle-11", "stopstart-11", "ball-flight", "ball-rolling",
                  "ball-spin", "dribble-flat", "dribble-chip")
     fields = ("contact_hashes", "contact_counts", "narrow_phase_calls",
@@ -42,6 +42,8 @@ def main():
         for scenario in scenarios:
             filtered = run(binary, scenario, traces[0], True)
             unfiltered = run(binary, scenario, traces[1], False)
+            if scenario.endswith("-6") and filtered["diagnostics"]["max_planar_robot_overlap_m"] > 0.002:
+                raise AssertionError(f"{scenario}: robot shells overlap by more than 2 mm")
             for field in fields:
                 if filtered[field] != unfiltered[field]:
                     raise AssertionError(f"{scenario}: filtering changed {field}")
