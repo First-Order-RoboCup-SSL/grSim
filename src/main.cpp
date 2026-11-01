@@ -18,6 +18,10 @@ Copyright (C) 2011, Parsian Robotic Center (eew.aut.ac.ir/~parsian/grsim)
 #include <QtWidgets/QApplication>
 #include "mainwindow.h"
 
+#ifdef GRSIM_BUILD_SMOKE_TEST
+int runApplicationSmokeTest(QApplication& app);
+#endif
+
 int main(int argc, char *argv[])
 {
     std::locale::global( std::locale( "" ) );
@@ -33,7 +37,14 @@ int main(int argc, char *argv[])
     QCommandLineOption headlessOption(QStringList() << "H" << "headless", 
                                       QCoreApplication::translate("main", "Run without a UI"));
     parser.addOption(headlessOption);
+#ifdef GRSIM_BUILD_SMOKE_TEST
+    QCommandLineOption smokeOption("smoke-test", "Check application resources, rendering and UDP, then exit.");
+    parser.addOption(smokeOption);
+#endif
     parser.process(a);
+#ifdef GRSIM_BUILD_SMOKE_TEST
+    if (parser.isSet(smokeOption)) return runApplicationSmokeTest(a);
+#endif
 
     MainWindow w;
     if (parser.isSet(headlessOption)) {

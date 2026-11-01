@@ -73,6 +73,8 @@ checks separately verify that Low Spec reduces textured wheel and chassis
 geometry. Settings tests load historical XML keys and check save/reload behavior.
 Configuration tests delay GUI notifications while remote robot specifications
 and GUI edits interleave, including queued preset selections.
+Geometry tests check both divisions' 2026 margins and substitution widths in
+outgoing vision packets, plus wall placement after live settings edits.
 Collision tests check side and rear ball contact, dribbler access, roller
 retention while stationary and moving, and flat/chip kicks for separate team
 sizes and rotated robots, including ball acquisition with recessed dribblers.

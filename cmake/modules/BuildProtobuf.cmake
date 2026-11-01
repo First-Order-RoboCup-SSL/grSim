@@ -23,12 +23,13 @@ include(ExternalProject)
 set(PROTOBUF_CMAKE_ARGS )
 
 ExternalProject_Add(protobuf_external
-                    # URL is the same as in the ER-Force framework,
-                    # because ER-Force needs it and has an incentive to keep the link stable
-  URL               http://www.robotics-erlangen.de/downloads/libraries/protobuf-cpp-3.6.1.tar.gz
+  URL               https://github.com/protocolbuffers/protobuf/releases/download/v3.6.1/protobuf-cpp-3.6.1.tar.gz
   URL_HASH          SHA256=b3732e471a9bb7950f090fd0457ebd2536a9ba0891b7f3785919c654fe2a2529
   SOURCE_SUBDIR     cmake
   CMAKE_ARGS
+                      ${GRSIM_EXTERNAL_PLATFORM_ARGS}
+                    # Protobuf 3.6.1 requests policies removed by CMake 4.
+                    -DCMAKE_POLICY_VERSION_MINIMUM=3.5
                     -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
                     -DCMAKE_TOOLCHAIN_FILE:PATH=${CMAKE_TOOLCHAIN_FILE}
                     -DCMAKE_C_COMPILER:PATH=${CMAKE_C_COMPILER}

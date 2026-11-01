@@ -41,7 +41,7 @@ GLWidget::GLWidget(QWidget *parent, ConfigWidget* _cfg, SimulationController* co
     selected = -1;
     clicked_robot = -1;
     moving_robot_id = -1;
-    renderer.graphics.setViewpoint(0, -(cfg->Field_Width() + cfg->Field_Margin() * 2) / 2, 3, 90, -45, 0);
+    renderer.graphics.setViewpoint(0, -(cfg->Field_Width() + cfg->Field_Margin_Touch_Line() * 2) / 2, 3, 90, -45, 0);
     Current_robot = 0;
     Current_team = 0;
     cammode = CameraMode::BIRDS_EYE_FROM_TOUCH_LINE;
@@ -465,14 +465,14 @@ void GLWidget::changeCameraMode()
         (static_cast<int>(CameraMode::MAX_ACTIVE_MODE_FOR_CHANGEMODE)+1));
     auto& graphics = renderer.graphics;
     if (cammode == CameraMode::BIRDS_EYE_FROM_TOUCH_LINE)
-        graphics.setViewpoint(0, -(cfg->Field_Width()+cfg->Field_Margin()*2)/2, 3, 90, -45, 0);
+        graphics.setViewpoint(0, -(cfg->Field_Width()+cfg->Field_Margin_Touch_Line()*2)/2, 3, 90, -45, 0);
     else if (cammode == CameraMode::TOP_VIEW) graphics.setViewpoint(0, 0, 5, 0, -90, 0);
     else if (cammode == CameraMode::BIRDS_EYE_FROM_OPPOSITE_TOUCH_LINE)
-        graphics.setViewpoint(0, (cfg->Field_Width()+cfg->Field_Margin()*2)/2, 3, 270, -45, 0);
+        graphics.setViewpoint(0, (cfg->Field_Width()+cfg->Field_Margin_Touch_Line()*2)/2, 3, 270, -45, 0);
     else if (cammode == CameraMode::BIRDS_EYE_FROM_BLUE)
-        graphics.setViewpoint(-(cfg->Field_Length()+cfg->Field_Margin()*2)/2, 0, 3, 0, -45, 0);
+        graphics.setViewpoint(-(cfg->Field_Length()+cfg->Field_Margin_Goal_Line()*2)/2, 0, 3, 0, -45, 0);
     else if (cammode == CameraMode::BIRDS_EYE_FROM_YELLOW)
-        graphics.setViewpoint((cfg->Field_Length()+cfg->Field_Margin()*2)/2, 0, 3, 180, -45, 0);
+        graphics.setViewpoint((cfg->Field_Length()+cfg->Field_Margin_Goal_Line()*2)/2, 0, 3, 180, -45, 0);
 }
 
 void GLWidget::putBall(dReal x, dReal y)

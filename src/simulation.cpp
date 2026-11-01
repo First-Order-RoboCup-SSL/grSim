@@ -29,7 +29,8 @@ bool requiresRebuild(const SimulationSettings& a, const SimulationSettings& b)
         a.Field_Penalty_Width() != b.Field_Penalty_Width() ||
         a.Field_Penalty_Depth() != b.Field_Penalty_Depth() ||
         a.Field_Penalty_Point() != b.Field_Penalty_Point() ||
-        a.Field_Margin() != b.Field_Margin() ||
+        a.Field_Margin_Touch_Line() != b.Field_Margin_Touch_Line() ||
+        a.Field_Margin_Goal_Line() != b.Field_Margin_Goal_Line() ||
         a.Field_Referee_Margin() != b.Field_Referee_Margin() ||
         a.Wall_Thickness() != b.Wall_Thickness() ||
         a.Goal_Thickness() != b.Goal_Thickness() ||

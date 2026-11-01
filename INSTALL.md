@@ -72,16 +72,16 @@ For Mac OS X, you will need to have installed:
 - [Xcode](https://developer.apple.com/xcode/) or Xcode Command Line Tools 8.0 or newer;
 - [Homebrew](http://brew.sh/) package manager.
 
-Than install the dependencies needed:
+Then install the dependencies needed:
 
 ```bash
-brew install cmake
-brew install pkg-config
-brew tap robotology/formulae         
-brew install robotology/formulae/ode
-brew install qt@5
-brew install protobuf@21
+brew install cmake pkg-config qt@5
+export CMAKE_PREFIX_PATH="$(brew --prefix qt@5)${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
 ```
+
+Keep this export in the shell used to build grSim so CMake and its dependency
+builds can find Qt on both Intel and Apple Silicon. ODE, VarTypes, and a
+compatible Protobuf are built automatically when needed.
 
 If you run into build issues, you may need to run this first:
 
@@ -168,3 +168,37 @@ Try adding -DBUILD_ODE=TRUE to build ODE from source instead of using the system
 ## Notes on the performance
 
 When running grSim, check the FPS in the status bar. If it is running at **60 FPS** or higher, everything is ok. Otherwise check the graphics card's driver installation and OpenGL settings.
+
+
+## Apple Silicon application (macOS 15 or later)
+
+The macOS CI jobs build native arm64 applications on macOS 15 and 26. Both jobs
+run the simulator regressions and the real application's rendering/UDP smoke
+check. The macOS 15 job uploads a ZIP containing a relocated grSim.app with Qt
+and robot configuration files. A separate macOS 26 job downloads and runs that
+exact ZIP without checking out or building the source. Download the artifact from the successful Build workflow,
+extract it, and open grSim.app.
+
+To build locally with Xcode Command Line Tools and Homebrew:
+
+    brew install cmake pkg-config qt@5
+    cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5)" \
+      -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
+      -DBUILD_ODE=ON -DBUILD_TESTING=ON -DGRSIM_MACOSX_BUNDLE=ON
+    cmake --build build -j 3
+    ctest --test-dir build --output-on-failure
+    bash tests/package_macos.sh build
+
+The packaged app uses ad-hoc signing; Developer ID signing and notarization
+are not configured. The runtime check exercises normal/Low Spec OpenGL images,
+robot configuration and textures, advancing vision packets, robot commands and
+feedback, motion and clean worker shutdown. It does not establish visual fidelity
+or performance on every Apple Silicon model. Intel/universal builds are not
+claimed. Normal builds can disable the bundle with GRSIM_MACOSX_BUNDLE=OFF.
+
+The timing observer reports raw packet latency and its own scheduling pauses.
+Linux/default regression latency remains below 75 ms. Shared native macOS CI
+uses an explicit 200 ms budget because observer pauses above 100 ms were measured
+on macOS 26; it still rejects the 500 ms vision freeze and unanswered-command
+negative controls. This is a CI acceptance budget, not a real-time guarantee.

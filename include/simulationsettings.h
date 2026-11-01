@@ -185,8 +185,12 @@ struct SimulationSettings {
     double Field_Penalty_Depth() const { return value_Field_Penalty_Depth; }
     double value_Field_Penalty_Point{};
     double Field_Penalty_Point() const { return value_Field_Penalty_Point; }
-    double value_Field_Margin{};
-    double Field_Margin() const { return value_Field_Margin; }
+    double value_Field_Margin_Touch_Line{};
+    double Field_Margin_Touch_Line() const { return value_Field_Margin_Touch_Line; }
+    double value_Field_Margin_Goal_Line{};
+    double Field_Margin_Goal_Line() const { return value_Field_Margin_Goal_Line; }
+    double value_Field_Goal_Substitution_Area_Width{};
+    double Field_Goal_Substitution_Area_Width() const { return value_Field_Goal_Substitution_Area_Width; }
     double value_Field_Referee_Margin{};
     double Field_Referee_Margin() const { return value_Field_Referee_Margin; }
     double value_Wall_Thickness{};

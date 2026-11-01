@@ -7,13 +7,15 @@ on:
 jobs:
   build-linux:
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-20.04, ubuntu-22.04, ubuntu-24.04 ]
+        os: [ ubuntu-22.04, ubuntu-24.04 ]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+      - name: "Select Ubuntu package mirror"
+        if: matrix.os == 'ubuntu-24.04'
+        run: sudo sed -i 's|http://azure\.archive\.ubuntu\.com/ubuntu|https://mirrors.edge.kernel.org/ubuntu|g' /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources
       - name: "Update dependencies"
         run: sudo apt-get update
       - name: "Install dependencies"
@@ -30,30 +32,60 @@ jobs:
 
   build-macos:
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
-        os: [ macos-13, macos-14 ]
+        os: [ macos-15, macos-26 ]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: "Install dependencies"
-        run: brew tap robotology/formulae && brew install cmake pkg-config qt@5
-      - name: "Build"
+        run: brew install cmake pkg-config qt@5
+      - name: "Build Apple Silicon application and tests"
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "15.0"
         run: |
-          # For macOS 13
-          export PATH="/usr/local/opt/qt@5/bin:$PATH"
-          export LDFLAGS="-L/usr/local/opt/qt@5/lib"
-          export CPPFLAGS="-I/usr/local/opt/qt@5/include"
-          export PKG_CONFIG_PATH="/usr/local/opt/qt@5/lib/pkgconfig"
-          
-          # For macOS 14
-          export PATH="/opt/homebrew/opt/qt@5/bin:$PATH"
-          export LDFLAGS="-L/opt/homebrew/opt/qt@5/lib"
-          export CPPFLAGS="-I/opt/homebrew/opt/qt@5/include"
-          export PKG_CONFIG_PATH="/opt/homebrew/opt/qt@5/lib/pkgconfig"
-          
-          make
+          qt_prefix="$(brew --prefix qt@5)"
+          export PATH="$qt_prefix/bin:$PATH"
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$qt_prefix" -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" \
+            -DBUILD_ODE=ON -DBUILD_TESTING=ON -DGRSIM_MACOSX_BUNDLE=ON
+          cmake --build build -j 3
+      - name: "Run native macOS regressions and OpenGL smoke check"
+        env:
+          # The shared macOS 26 runner has measured observer pauses >100 ms.
+          # Retain the 500 ms silence/missing-feedback negative controls.
+          GRSIM_TEST_TIMING_BUDGET_MS: "200"
+        run: ctest --test-dir build --output-on-failure
+      - name: "Package and run relocated Apple Silicon app"
+        if: matrix.os == 'macos-15'
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "15.0"
+        run: bash tests/package_macos.sh build
+      - name: "Upload Apple Silicon application"
+        if: matrix.os == 'macos-15'
+        uses: actions/upload-artifact@v4
+        with:
+          name: grSim-arm64-${{ matrix.os }}
+          path: dist/grSim-macos-arm64-15.0.zip
+          if-no-files-found: error
+
+  test-macos-26-download:
+    name: Run the macOS 15 download on macOS 26
+    needs: build-macos
+    runs-on: macos-26
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: grSim-arm64-macos-15
+          path: artifact
+      - name: "Extract and run the shipped application without a build checkout"
+        run: |
+          mkdir -p "$RUNNER_TEMP/grSim-download"
+          ditto -x -k artifact/grSim-macos-arm64-15.0.zip "$RUNNER_TEMP/grSim-download"
+          cd "$RUNNER_TEMP/grSim-download"
+          unset QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH QML2_IMPORT_PATH DYLD_LIBRARY_PATH DYLD_FRAMEWORK_PATH
+          ./grSim.app/Contents/MacOS/grSim --smoke-test
 
 # Windows build does not work currently, see https://github.com/RoboCup-SSL/grSim/issues/183
 #  build-windows:
