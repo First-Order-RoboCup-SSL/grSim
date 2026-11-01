@@ -172,10 +172,11 @@ When running grSim, check the FPS in the status bar. If it is running at **60 FP
 
 ## Apple Silicon application (macOS 15 or later)
 
-The macOS CI jobs build native arm64 applications on macOS 15 and 26. Each job
-runs the simulator regressions and the real application's rendering/UDP smoke
-check, then uploads a ZIP containing a relocated grSim.app with Qt and robot
-configuration files. Download the artifact from the successful Build workflow,
+The macOS CI jobs build native arm64 applications on macOS 15 and 26. Both jobs
+run the simulator regressions and the real application's rendering/UDP smoke
+check. The macOS 15 job uploads a ZIP containing a relocated grSim.app with Qt
+and robot configuration files. A separate macOS 26 job downloads and runs that
+exact ZIP without checking out or building the source. Download the artifact from the successful Build workflow,
 extract it, and open grSim.app.
 
 To build locally with Xcode Command Line Tools and Homebrew:

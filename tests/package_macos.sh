@@ -23,6 +23,10 @@ for path in app.rglob("*"):
     architectures = subprocess.check_output(["lipo", "-archs", str(path)], text=True).split()
     if "arm64" not in architectures:
         raise SystemExit(f"Missing arm64 slice: {path}")
+    identifiers = subprocess.check_output(["otool", "-D", str(path)], text=True).splitlines()[1:]
+    for identifier in identifiers:
+        if identifier.strip().startswith(("/opt/", "/usr/local/", "/Users/")):
+            subprocess.check_call(["install_name_tool", "-id", "@rpath/" + path.name, str(path)])
     load_commands = subprocess.check_output(["otool", "-arch", "arm64", "-l", str(path)], text=True)
     for block in load_commands.split("Load command "):
         if "LC_BUILD_VERSION" in block or "LC_VERSION_MIN_MACOSX" in block:
