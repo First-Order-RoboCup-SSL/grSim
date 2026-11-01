@@ -53,7 +53,7 @@ int main(int argc, char *argv[])
         w.setIsGlEnabled(false);
     } else {
         // Run normally
-        w.show();
+        w.showMaximized();
     }
     return a.exec();
 }

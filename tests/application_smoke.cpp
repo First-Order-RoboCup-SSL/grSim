@@ -1,10 +1,13 @@
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QImage>
+#include <QLabel>
+#include <QThread>
 #include <QSet>
 #include <QTimer>
 #include <QUdpSocket>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include "mainwindow.h"
@@ -38,11 +41,16 @@ int runApplicationSmokeTest(QApplication& app)
     config->v_YellowControlListenPort->setInt(0);
     config->v_sendDelay->setInt(0);
     MainWindow window(nullptr, config);
+    const bool initiallyHidden = !window.isVisible();
     window.resize(800, 600);
     window.show();
     auto* view = window.findChild<GLWidget*>();
     if (!view) return 2;
 
+    std::atomic<bool> renderOnGuiThread{true};
+    QObject::connect(view, &GLWidget::frameRendered, [&]() {
+        if (QThread::currentThread() != app.thread()) renderOnGuiThread.store(false);
+    });
     int frames = 0, responses = 0;
     double firstTime = -1, lastTime = -1;
     bool monotonic = true, havePosition = false;
@@ -105,11 +113,19 @@ int runApplicationSmokeTest(QApplication& app)
             return !image.isNull() && colors.size() > 16;
         };
         const bool textures = !QImage(":/y0.png").isNull() && !QImage(":/b0.png").isNull();
-        const bool rendering = view->isValid() && nonblank(normal) && nonblank(low);
+        const auto* graphicsStatus = window.findChild<QLabel*>("graphicsDeviceStatus");
+        const auto* physicsStatus = window.findChild<QLabel*>("physicsProcessorStatus");
+        const QString device = view->graphicsRendererName();
+        const bool deviceStatus = graphicsStatus && physicsStatus && !device.isEmpty() &&
+            graphicsStatus->toolTip().contains(device) && physicsStatus->text().contains("CPU");
+        const bool rendering = initiallyHidden && view->isValid() && renderOnGuiThread.load() &&
+            nonblank(normal) && nonblank(low);
         const bool network = frames > 30 && responses > 5 && monotonic && lastTime-firstTime > 0.5;
-        result = resources && textures && rendering && network && distance > 10 ? 0 : 1;
+        result = resources && textures && rendering && deviceStatus && network && distance > 10 ? 0 : 1;
         std::printf("%s application smoke: config=%d textures=%d OpenGL=%d vision=%d feedback=%d moved=%.1fmm\n",
                     result == 0 ? "PASS" : "FAIL", resources, textures, rendering, frames, responses, distance);
+        std::printf("Renderer: %s; status=%d; rendering_on_gui_thread=%d\n",
+                    device.toUtf8().constData(), deviceStatus, renderOnGuiThread.load());
         std::fflush(stdout);
         app.exit(result);
     });

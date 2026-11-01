@@ -62,6 +62,10 @@ public:
     const RobotSnapshot* robotSnapshot(int index) const;
     QImage robotImage(int index) const;
     void sendAction(SimulationAction action);
+    QString graphicsRendererName() const { return graphicsRenderer; }
+    QString graphicsRendererVendor() const { return graphicsVendor; }
+    QString graphicsRendererVersion() const { return graphicsVersion; }
+    bool usesSoftwareRendering() const { return softwareRendering; }
     bool graphicsEnabled = true;
     int selected = -1;
     std::array<double, 3> cursor{{0, 0, 0}};
@@ -128,6 +132,8 @@ private:
     int moving_robot_id,clicked_robot;
     SceneSnapshotPtr snapshot;
     SceneRenderer renderer;
+    QString graphicsRenderer, graphicsVendor, graphicsVersion;
+    bool softwareRendering = false;
     QWidget* lagWarning;
     bool showCursor = false;
     double cursorRadius = 0;

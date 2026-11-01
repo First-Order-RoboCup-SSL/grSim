@@ -75,6 +75,7 @@ public slots:
     int robotIndex(int robot,int team);
 private:
     int getRenderInterval();
+    void updateGraphicsDeviceStatus();
     SimulationController* simulation;
     QTimer *renderTimer;
     QTimer *uiTimer;
@@ -95,6 +96,7 @@ private:
     QAction *showsimulator, *showconfig, *showrobot;
     QAction* fullScreenAct;
     QLabel *fpslabel,*cursorlabel,*selectinglabel,*vanishlabel,*noiselabel;
+    QLabel* graphicsDeviceLabel;
     QString current_dir;
 
     std::array<double, 3> previousVelocity{{0, 0, 0}};

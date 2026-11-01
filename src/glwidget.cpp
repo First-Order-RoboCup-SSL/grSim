@@ -386,7 +386,23 @@ void GLWidget::mouseMoveEvent(QMouseEvent* event)
 }
 
 void GLWidget::mouseReleaseEvent(QMouseEvent*) { emit clicked(); }
-void GLWidget::initializeGL() { if (snapshot) renderer.initialize(*snapshot); }
+void GLWidget::initializeGL()
+{
+    // Query this widget's current context once, rather than probing installed GPUs.
+    auto contextString = [](GLenum name) {
+        const auto* value = glGetString(name);
+        return value ? QString::fromLatin1(reinterpret_cast<const char*>(value)) : QString();
+    };
+    graphicsRenderer = contextString(GL_RENDERER);
+    graphicsVendor = contextString(GL_VENDOR);
+    graphicsVersion = contextString(GL_VERSION);
+    const QString name = graphicsRenderer.toLower();
+    softwareRendering = name.contains("llvmpipe") || name.contains("softpipe") ||
+        name.contains("swrast") || name.contains("swiftshader") ||
+        name.contains("software") || name.contains("gdi generic") ||
+        name.contains("microsoft basic render");
+    if (snapshot) renderer.initialize(*snapshot);
+}
 void GLWidget::resizeGL(int width, int height) { glViewport(0, 0, width, height); }
 bool GLWidget::hasFramebufferObjects() const { return QGLFramebufferObject::hasOpenGLFramebufferObjects(); }
 bool GLWidget::hasFramebufferBlit() const { return QGLFramebufferObject::hasOpenGLFramebufferBlit(); }
