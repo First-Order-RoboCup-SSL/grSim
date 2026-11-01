@@ -236,13 +236,19 @@ Robot::Robot(PWorld* world,PBall *ball,SimulationSettings* _cfg,dReal x,dReal y,
     ballHull->space = space;
     w->addObject(ballHull);
 
-    dummy   = new PBall(x,y,z,settings.RobotCenterFromKicker,settings.BodyMass*0.01f,0,0,0);
-    dummy->setVisibility(false);
+    // The old fixed proxy body was coincident with the chassis. Preserve their
+    // combined mass and inertia while removing its six redundant joint rows.
+    dMass chassisMass, proxyMass;
+    dBodyGetMass(chassis->body, &chassisMass);
+    dMassSetSphereTotal(&proxyMass, settings.BodyMass*0.01f, settings.RobotCenterFromKicker);
+    dMassAdd(&chassisMass, &proxyMass);
+    dBodySetMass(chassis->body, &chassisMass);
+
+    // Robot contact uses the outer shell radius; the separate ball hull still
+    // provides the dribbler cutout. The sphere follows the chassis automatically.
+    dummy = new PCollisionSphere(chassis->body, settings.RobotRadius);
     dummy->space = space;
     w->addObject(dummy);
-
-    dummy_to_chassis = dJointCreateFixed(world->world,0);
-    dJointAttach (dummy_to_chassis,chassis->body,dummy->body);
 
     kicker = new Kicker(this);
 
@@ -324,8 +330,6 @@ void Robot::resetRobot()
     resetSpeeds();
     dBodySetLinearVel(chassis->body,0,0,0);
     dBodySetAngularVel(chassis->body,0,0,0);
-    dBodySetLinearVel(dummy->body,0,0,0);
-    dBodySetAngularVel(dummy->body,0,0,0);
     dBodySetLinearVel(kicker->box->body,0,0,0);
     dBodySetAngularVel(kicker->box->body,0,0,0);
     for (int i=0;i<4;i++)
@@ -373,7 +377,6 @@ void Robot::setXY(dReal x,dReal y)
     dReal height = ROBOT_START_Z(cfg);
     chassis->getBodyPosition(xx,yy,zz);
     chassis->setBodyPosition(x,y,height);
-    dummy->setBodyPosition(x,y,height);
     kicker->box->getBodyPosition(kx,ky,kz);
     kicker->box->setBodyPosition(kx-xx+x,ky-yy+y,kz-zz+height);
     for (int i=0;i<4;i++)
@@ -388,7 +391,6 @@ void Robot::setDir(dReal ang)
     ang*=M_PI/180.0f;
     chassis->setBodyRotation(0,0,1,ang);
     kicker->box->setBodyRotation(0,0,1,ang);
-    dummy->setBodyRotation(0,0,1,ang);
     dMatrix3 wLocalRot,wRot,cRot;
     dVector3 localPos,finalPos,cPos;
     chassis->getBodyPosition(cPos[0],cPos[1],cPos[2],false);

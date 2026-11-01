@@ -4,6 +4,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <algorithm>
+#include <atomic>
+#include <cstdarg>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -21,6 +23,13 @@
 namespace {
 using Clock = std::chrono::steady_clock;
 constexpr double tick = 1.0/60;
+std::atomic<unsigned> lcpErrors{0};
+void recordOdeMessage(int code, const char* format, va_list arguments)
+{
+    if (code == d_ERR_LCP) ++lcpErrors;
+    std::vfprintf(stderr, format, arguments);
+    std::fputc('\n', stderr);
+}
 struct Options {
     QString scenario = "spaced-6", traceFile, perfControl, perfAck;
     unsigned helpers = 0, islands = 1, preparation = 1;
@@ -136,7 +145,7 @@ struct Diagnostics {
     std::vector<dBodyID> bodies;
     std::map<dBodyID,size_t> index;
     double maxAnchor = 0, anchorSquares = 0, maxAxisDegrees = 0;
-    double maxSpeed = 0, maxSpin = 0, minChassisZ = 1e9;
+    double maxSpeed = 0, maxSpin = 0, minChassisZ = 1e9, maxRobotOverlap = 0;
     uint64_t anchorSamples = 0, islandObservations = 0;
     size_t maxIsland = 0;
     double sumLargestIsland = 0, sumIslandCount = 0;
@@ -198,6 +207,13 @@ struct Diagnostics {
         state();
         for (int i=0; i<world.cfg->Robots_Count()*2; ++i) {
             minChassisZ=std::min(minChassisZ,double(dBodyGetPosition(world.robots[i]->chassis->body)[2]));
+            const auto* a=dBodyGetPosition(world.robots[i]->chassis->body);
+            for (int j=i+1; j<world.cfg->Robots_Count()*2; ++j) {
+                const auto* b=dBodyGetPosition(world.robots[j]->chassis->body);
+                const double radii=world.robots[i]->settings.RobotRadius+world.robots[j]->settings.RobotRadius;
+                // Planar shell overlap for these ground-level match fixtures.
+                maxRobotOverlap=std::max(maxRobotOverlap,radii-std::hypot(a[0]-b[0],a[1]-b[1]));
+            }
             for (auto* wheel : world.robots[i]->wheels) {
                 dVector3 a,b,axis;
                 dJointGetHingeAnchor(wheel->joint,a); dJointGetHingeAnchor2(wheel->joint,b);
@@ -214,7 +230,7 @@ struct Diagnostics {
     QJsonObject json() const
     {
         return {{"body_count",int(bodies.size())}, {"state_values_per_body",13},
-            {"max_hinge_anchor_error_m",maxAnchor},
+            {"max_hinge_anchor_error_m",maxAnchor}, {"max_planar_robot_overlap_m",maxRobotOverlap},
             {"rms_hinge_anchor_error_m",anchorSamples ? std::sqrt(anchorSquares/anchorSamples) : 0},
             {"max_wheel_axis_error_deg",maxAxisDegrees}, {"max_linear_speed_m_s",maxSpeed},
             {"max_angular_speed_rad_s",maxSpin}, {"min_chassis_z_m",bodies.size()>1 ? minChassisZ : 0},
@@ -474,6 +490,8 @@ int main(int argc,char** argv)
     if (options.scenario.endsWith("-6")) config.v_Division->setString("Division B");
     auto settings=config.simulationSettings();
     if (!dInitODE2(dInitFlagManualThreadCleanup) || !dAllocateODEDataForThread(dAllocateMaskAll)) return 2;
+    const auto previousMessageHandler=dGetMessageHandler();
+    dSetMessageHandler(recordOdeMessage);
     int status=0;
     QJsonObject output;
     try {
@@ -482,6 +500,11 @@ int main(int argc,char** argv)
     } catch (const std::exception& error) {
         output["success"]=false; output["error"]=QString::fromLocal8Bit(error.what()); status=1;
     }
+    output["lcp_errors"]=int(lcpErrors.load());
+    if (lcpErrors != 0) {
+        output["success"]=false; output["error"]="ODE constraint solver reported failures"; status=1;
+    }
+    dSetMessageHandler(previousMessageHandler);
     dCleanupODEAllDataForThread(); dCloseODE();
     std::puts(QJsonDocument(output).toJson(QJsonDocument::Compact).constData());
     return status;

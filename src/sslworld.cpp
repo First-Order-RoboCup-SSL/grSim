@@ -320,7 +320,7 @@ SSLWorld::SSLWorld(QObject* parent, SimulationSettings* _cfg, RobotsFormation *f
         {            
             if (k != j)
             {
-                p->createSurface(robots[k]->dummy,robots[j]->dummy); //seams ode doesn't understand cylinder-cylinder contacts, so I used spheres
+                p->createSurface(robots[k]->dummy,robots[j]->dummy); // one sphere per outer robot shell
                 p->createSurface(robots[k]->chassis,robots[j]->kicker->box);
             }
         }

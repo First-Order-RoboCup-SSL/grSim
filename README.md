@@ -78,6 +78,12 @@ outgoing vision packets, plus wall placement after live settings edits.
 Collision tests check side and rear ball contact, dribbler access, roller
 retention while stationary and moving, and flat/chip kicks for separate team
 sizes and rotated robots, including ball acquisition with recessed dribblers.
+Robot-pair regressions also cover side/rear pushing, rotated and different-sized
+robots, with serial ODE and optional helpers. Robot contact spheres match the
+outer shell radius and attach directly to the chassis, avoiding an extra fixed
+body while preserving the previous combined mass and inertia. The kinematic
+ball/hull fixtures isolate wheel-ground and rolling constraints; dynamic physics
+and robot-pair tests retain the production defaults.
 The ball-contact hull keeps the body outline and cuts its front back when needed
 to reach the configured dribbler. Render quality does not change this shape.
 Tests use temporary configuration values without reading or writing personal
@@ -101,7 +107,9 @@ For sustained opposing-team contact on a Division B field:
     QT_QPA_PLATFORM=offscreen ./bin/grSim_ode_performance_experiments --scenario pushing-6 --helpers 3 --islands 3 --steps 300
 
 The performance harness also provides spaced-6 and crowded-6; each uses twelve
-robots total. These benchmarks exclude rendering, networking and real-time
+robots total. Add `--audit 1` to report maximum planar robot-shell overlap and
+contact/constraint diagnostics. The six-a-side regression rejects overlap above
+2 mm. These benchmarks exclude rendering, networking and real-time
 throttling. Compare builds using the same geometry, physics settings and workload.
 
 Star History

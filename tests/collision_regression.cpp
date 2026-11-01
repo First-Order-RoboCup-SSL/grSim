@@ -3,14 +3,15 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdarg>
+#include <atomic>
 #include "configwidget.h"
 #include "sslworld.h"
 
-static unsigned lcpErrors = 0;
+static std::atomic<unsigned> lcpErrors{0};
 static void recordOdeMessage(int code, const char* format, va_list arguments)
 {
     if (code == d_ERR_LCP) ++lcpErrors;
-    else { std::vfprintf(stderr, format, arguments); std::fputc('\n', stderr); }
+    std::vfprintf(stderr, format, arguments); std::fputc('\n', stderr);
 }
 
 static bool check(bool passed, const char* description)
@@ -31,6 +32,10 @@ static void placeBall(SSLWorld& world, double x, double y, double z)
 
 static bool checkRobot(SimulationSettings settings, int team, double heading)
 {
+    // Isolate hull/ball geometry from rolling constraints against a kinematic
+    // chassis. Dynamic dribble/rolling and robot-pair tests use full defaults.
+    settings.value_BallRollingDeceleration = 0;
+    settings.value_BallFriction = 0;
     const auto& teamSettings = team ? settings.yellowSettings : settings.blueSettings;
     std::printf("CHECK team=%d heading=%.0f radius=%.1fmm dribbler=%.1fmm\n", team, heading,
                 teamSettings.RobotRadius*1000, teamSettings.RobotCenterFromKicker*1000);
@@ -43,6 +48,13 @@ static bool checkRobot(SimulationSettings settings, int team, double heading)
     for (int i = 0; i < 200; ++i) world.p->step(1.0/300.0);
     // Hold the chassis still to measure ball penetration rather than robot pushback.
     dBodySetKinematic(robot->chassis->body);
+    // A held chassis does not need driven wheels constrained against the floor.
+    for (auto* wheel : robot->wheels) {
+        dJointSetAMotorParam(wheel->motor, dParamFMax, 0);
+        dGeomDisable(wheel->cyl->geom);
+        dBodySetGravityMode(wheel->cyl->body, 0);
+    }
+
     dBodySetLinearVel(robot->chassis->body,0,0,0);
     dBodySetAngularVel(robot->chassis->body,0,0,0);
     world.p->setGravity(0);
@@ -164,6 +176,76 @@ static bool checkRobot(SimulationSettings settings, int team, double heading)
     return passed;
 }
 
+// Use the production pair registration, motors and five-substep integrator.
+static bool checkRobotPair(SimulationSettings settings, double heading, double side, unsigned helpers)
+{
+    settings.value_Robots_Count = 1;
+    settings.value_DeltaTime = 1.0/60;
+    RobotsFormation formation(FORMATION_INSIDE_1, &settings);
+    SSLWorld world(nullptr, &settings, &formation, &formation);
+    if (!check(world.p->setThreadCount(helpers), "robot-pair ODE helpers are available")) return false;
+    auto* first = world.robots[0];
+    auto* second = world.robots[1];
+    bool preservedMass = true;
+    for (auto* robot : {first, second}) {
+        dMass mass;
+        dBodyGetMass(robot->chassis->body, &mass);
+        const auto& shape = robot->settings;
+        const double cylinder = shape.BodyMass*0.99f, proxy = shape.BodyMass*0.01f;
+        const double sphereInertia = 0.4*proxy*shape.RobotCenterFromKicker*shape.RobotCenterFromKicker;
+        const double transverse = cylinder*(3*shape.RobotRadius*shape.RobotRadius+
+                                            shape.RobotHeight*shape.RobotHeight)/12+sphereInertia;
+        const double axial = 0.5*cylinder*shape.RobotRadius*shape.RobotRadius+sphereInertia;
+        preservedMass = preservedMass && std::abs(mass.mass-cylinder-proxy) < 1e-12 &&
+            std::abs(mass.I[0]-transverse) < 1e-12 && std::abs(mass.I[5]-transverse) < 1e-12 &&
+            std::abs(mass.I[10]-axial) < 1e-12;
+    }
+    if (!check(preservedMass, "compound robot preserves total chassis/proxy mass and inertia")) return false;
+    first->step(); second->step();
+    const double angle = (heading+side)*M_PI/180;
+    const double x = std::cos(angle), y = std::sin(angle);
+    const double diameter = first->settings.RobotRadius+second->settings.RobotRadius;
+    const double start = diameter+0.02;
+    first->setXY(-x*start/2, -y*start/2);
+    second->setXY(x*start/2, y*start/2);
+    first->setDir(heading); second->setDir(heading);
+    placeBall(world, 2, 2, settings.BallRadius());
+    for (int i=0; i<60; ++i) world.stepPhysics(1.0/60);
+
+    unsigned pairContacts = 0;
+    PWorld::StepStatistics statistics;
+    statistics.contactObserver = [&](const dContact& contact) {
+        if ((contact.geom.g1 == first->dummy->geom && contact.geom.g2 == second->dummy->geom) ||
+            (contact.geom.g2 == first->dummy->geom && contact.geom.g1 == second->dummy->geom))
+            ++pairContacts;
+    };
+    const double local = side*M_PI/180;
+    double closest = start;
+    for (int i=0; i<120; ++i) {
+        first->setSpeed(0.25*std::cos(local), 0.25*std::sin(local), 0);
+        second->setSpeed(-0.25*std::cos(local), -0.25*std::sin(local), 0);
+        world.stepPhysics(1.0/60, PhysicsStepOptions(), &statistics);
+        const auto* a = dBodyGetPosition(first->chassis->body);
+        const auto* b = dBodyGetPosition(second->chassis->body);
+        const double distance = std::hypot(a[0]-b[0], a[1]-b[1]);
+        if (!std::isfinite(distance)) return check(false, "robot-pair positions stay finite");
+        closest = std::min(closest, distance);
+    }
+    const bool blocked = pairContacts > 0 && closest >= diameter-0.002;
+    first->resetRobot();
+    first->setXY(1, -1);
+    first->setDir(heading+45);
+    const auto* center = dGeomGetPosition(first->dummy->geom);
+    const bool followsPose = std::hypot(center[0]-1, center[1]+1) < 1e-12;
+    const bool passed = blocked && followsPose;
+    std::printf("%s robot-pair radii=%.1f/%.1fmm heading=%.0f side=%.0f helpers=%u "
+                "closest=%.2fmm expected=%.2fmm contacts=%u\n",
+                passed ? "PASS" : "FAIL", first->settings.RobotRadius*1000,
+                second->settings.RobotRadius*1000, heading, side, helpers,
+                closest*1000, diameter*1000, pairContacts);
+    return passed;
+}
+
 int main(int argc, char** argv)
 {
     QApplication app(argc, argv);
@@ -174,7 +256,8 @@ int main(int argc, char** argv)
     settings.yellowSettings.RobotRadius = 0.0793;
     settings.yellowSettings.RobotCenterFromKicker = 0.068;
     settings.yellowSettings.RobotHeight = 0.138;
-    dInitODE2(0);
+    if (!dInitODE2(dInitFlagManualThreadCleanup) ||
+        !dAllocateODEDataForThread(dAllocateMaskAll)) return 2;
     const auto previousMessageHandler = dGetMessageHandler();
     dSetMessageHandler(recordOdeMessage);
     bool passed = true;
@@ -188,8 +271,21 @@ int main(int argc, char** argv)
         for (double heading : {0.0, 90.0})
             passed = checkRobot(settings, 0, heading) && passed;
     }
+    // Reverse the team sizes to catch either team's collider using shared settings.
+    for (int sizes=0; sizes<3; ++sizes) {
+        settings.blueSettings.RobotRadius = sizes == 2 ? 0.0793 : 0.09;
+        settings.yellowSettings.RobotRadius = sizes == 1 ? 0.0793 : 0.09;
+        settings.blueSettings.RobotCenterFromKicker = sizes == 2 ? 0.068 : 0.073;
+        settings.yellowSettings.RobotCenterFromKicker = sizes == 1 ? 0.068 : 0.073;
+        for (double heading : {0.0, 90.0}) for (double side : {90.0, 180.0}) {
+            passed = checkRobotPair(settings, heading, side, 0) && passed;
+            if (dCheckConfiguration("ODE_EXT_threading") && dCheckConfiguration("ODE_THR_builtin_impl"))
+                passed = checkRobotPair(settings, heading, side, 3) && passed;
+        }
+    }
     passed = check(lcpErrors == 0, "contact fixtures complete without LCP solver errors") && passed;
     dSetMessageHandler(previousMessageHandler);
+    dCleanupODEAllDataForThread();
     dCloseODE();
     return passed ? 0 : 1;
 }
