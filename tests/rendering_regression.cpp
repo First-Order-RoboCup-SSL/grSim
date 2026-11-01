@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QThread>
+#include <QWindow>
 #include <cstdio>
 #include <cstdlib>
 #include <set>
@@ -10,6 +11,16 @@
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
 #include "mainwindow.h"
+
+#ifdef GRSIM_CHECK_PRIMITIVE_MODES
+static unsigned legacyPrimitiveCalls = 0;
+extern "C" void __real_glBegin(GLenum mode);
+extern "C" void __wrap_glBegin(GLenum mode)
+{
+    if (mode == GL_TRIANGLE_FAN || mode == GL_POLYGON) ++legacyPrimitiveCalls;
+    __real_glBegin(mode);
+}
+#endif
 
 class TestView : public GLWidget {
 public:
@@ -224,6 +235,12 @@ int main(int argc, char** argv)
         TestView fallback(config, view->simulation);
         fallback.resize(512, 512);
         fallback.show();
+        QElapsedTimer exposed;
+        exposed.start();
+        while ((!fallback.windowHandle() || !fallback.windowHandle()->isExposed()) &&
+               exposed.elapsed() < 2000) {
+            app.processEvents(); QThread::msleep(1);
+        }
         app.processEvents();
         fallback.allowBlit = false;
         config->v_LowSpecMode->setBool(true);
@@ -261,6 +278,12 @@ int main(int argc, char** argv)
         passed = checkNonblankImage(target.toImage(), true, QSize(377, 211)) && passed;
         target.release();
     }
+#ifdef GRSIM_CHECK_PRIMITIVE_MODES
+    const bool nativeTopology = legacyPrimitiveCalls == 0;
+    std::printf("%s cached geometry avoids legacy primitive conversion (%u fan/polygon calls)\n",
+                nativeTopology ? "PASS" : "FAIL", legacyPrimitiveCalls);
+    passed = nativeTopology && passed;
+#endif
     delete window;
     return passed ? 0 : 1;
 }
