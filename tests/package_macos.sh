@@ -28,6 +28,7 @@ for path in app.rglob("*"):
         if identifier.strip().startswith(("/opt/", "/usr/local/", "/Users/")):
             subprocess.check_call(["install_name_tool", "-id", "@rpath/" + path.name, str(path)])
     load_commands = subprocess.check_output(["otool", "-arch", "arm64", "-l", str(path)], text=True)
+    has_bundle_rpath = "@executable_path/../Frameworks" in load_commands
     for block in load_commands.split("Load command "):
         if "LC_BUILD_VERSION" in block or "LC_VERSION_MIN_MACOSX" in block:
             minimum = re.search(r"(?m)^\s+(?:minos|version)\s+(\d+(?:\.\d+)*)", block)
@@ -39,8 +40,17 @@ for path in app.rglob("*"):
             rpath = re.search(r"(?m)^\s+path\s+(\S+)", block)
             if rpath and rpath.group(1).startswith(("/opt/", "/usr/local/", "/Users/")):
                 subprocess.check_call(["install_name_tool", "-delete_rpath", rpath.group(1), str(path)])
+    if not has_bundle_rpath:
+        subprocess.check_call(["install_name_tool", "-add_rpath", "@executable_path/../Frameworks", str(path)])
+    identifiers = set(subprocess.check_output(["otool", "-D", str(path)], text=True).splitlines()[1:])
     for line in subprocess.check_output(["otool", "-L", str(path)], text=True).splitlines()[1:]:
         dependency = line.strip().split(" (", 1)[0]
+        if dependency in identifiers:
+            continue  # LC_ID_DYLIB is an identifier, not a dependency.
+        if dependency.startswith("@rpath/"):
+            bundled = app/"Contents"/"Frameworks"/dependency[len("@rpath/"):]
+            if not bundled.is_file():
+                raise SystemExit(f"Missing bundled runtime dependency in {path}: {dependency}")
         if dependency.startswith("/") and not dependency.startswith(("/System/Library/", "/usr/lib/")):
             raise SystemExit(f"External runtime dependency in {path}: {dependency}")
 print("PASS relocated bundle dependency audit")
@@ -58,5 +68,5 @@ ditto -x -k "$archive" "$relocated"
 (
     cd "$relocated"
     unset QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH QML2_IMPORT_PATH DYLD_LIBRARY_PATH DYLD_FRAMEWORK_PATH
-    ./grSim.app/Contents/MacOS/grSim --smoke-test
+    QT_DEBUG_PLUGINS=1 ./grSim.app/Contents/MacOS/grSim --smoke-test
 )
