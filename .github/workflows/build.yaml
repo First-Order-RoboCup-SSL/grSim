@@ -52,6 +52,10 @@ jobs:
             -DBUILD_ODE=ON -DBUILD_TESTING=ON -DGRSIM_MACOSX_BUNDLE=ON
           cmake --build build -j 3
       - name: "Run native macOS regressions and OpenGL smoke check"
+        env:
+          # The shared macOS 26 runner has measured observer pauses >100 ms.
+          # Retain the 500 ms silence/missing-feedback negative controls.
+          GRSIM_TEST_TIMING_BUDGET_MS: "200"
         run: ctest --test-dir build --output-on-failure
       - name: "Package and run relocated Apple Silicon app"
         env:

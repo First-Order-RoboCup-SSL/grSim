@@ -195,3 +195,9 @@ robot configuration and textures, advancing vision packets, robot commands and
 feedback, motion and clean worker shutdown. It does not establish visual fidelity
 or performance on every Apple Silicon model. Intel/universal builds are not
 claimed. Normal builds can disable the bundle with GRSIM_MACOSX_BUNDLE=OFF.
+
+The timing observer reports raw packet latency and its own scheduling pauses.
+Linux/default regression latency remains below 75 ms. Shared native macOS CI
+uses an explicit 200 ms budget because observer pauses above 100 ms were measured
+on macOS 26; it still rejects the 500 ms vision freeze and unanswered-command
+negative controls. This is a CI acceptance budget, not a real-time guarantee.
