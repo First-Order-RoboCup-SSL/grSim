@@ -92,12 +92,17 @@ Helpers are disabled by default; see the
 Ball physics defaults and migration are described in the
 [installation guide](INSTALL.md#ball-physics-defaults).
 
-For a repeatable physics-only benchmark after building the tests:
+For a repeatable physics-only benchmark after building the tests (6 v 6 by default):
 
     python3 tests/benchmark_ode.py bin/grSim_ode_test --repeats 3 --steps 300 --output /tmp/grsim-ode-benchmark.json
 
-This excludes rendering, networking and real-time throttling. Compare builds
-using the same geometry, physics settings and workload.
+For sustained opposing-team contact on a Division B field:
+
+    QT_QPA_PLATFORM=offscreen ./bin/grSim_ode_performance_experiments --scenario pushing-6 --helpers 3 --islands 3 --steps 300
+
+The performance harness also provides spaced-6 and crowded-6; each uses twelve
+robots total. These benchmarks exclude rendering, networking and real-time
+throttling. Compare builds using the same geometry, physics settings and workload.
 
 Star History
 ------

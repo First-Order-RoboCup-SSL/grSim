@@ -15,6 +15,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable", type=Path)
     parser.add_argument("--baseline", type=Path)
+    parser.add_argument("--robots", type=int, choices=range(1, 17), default=6,
+                        help="robots per team (default: 6, twelve robots total)")
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--steps", type=int, default=300)
     parser.add_argument("--output", type=Path, required=True)
@@ -23,12 +25,13 @@ def main():
         parser.error("repeats and steps must be positive")
     modes = [("current-serial", args.executable.resolve(), 0),
              ("current-2-helpers", args.executable.resolve(), 2),
+             ("current-3-helpers", args.executable.resolve(), 3),
              ("current-4-helpers", args.executable.resolve(), 4)]
     if args.baseline:
         modes.insert(0, ("baseline", args.baseline.resolve(), 0))
     cases = [(mode, executable, helpers, robots, crowded)
              for mode, executable, helpers in modes
-             for robots, crowded in [(11, False), (16, False), (11, True)]]
+             for robots, crowded in [(args.robots, False), (args.robots, True)]]
     jobs = []
     randomizer = random.Random(166)
     for measurement in range(1, args.repeats + 1):
@@ -51,7 +54,7 @@ def main():
               f"crowded={crowded} ms/tick={result['ms_per_tick']:.3f}", flush=True)
     summaries = []
     for mode, _, helpers in modes:
-        for robots, crowded in [(11, False), (16, False), (11, True)]:
+        for robots, crowded in [(args.robots, False), (args.robots, True)]:
             samples = [r for r in results if r["mode"] == mode and
                        r["robots_per_team"] == robots and r["crowded"] == crowded]
             serial = next(r for r in results if r["mode"] == "current-serial" and

@@ -22,7 +22,7 @@ namespace {
 using Clock = std::chrono::steady_clock;
 constexpr double tick = 1.0/60;
 struct Options {
-    QString scenario = "spaced-11", traceFile, perfControl, perfAck;
+    QString scenario = "spaced-6", traceFile, perfControl, perfAck;
     unsigned helpers = 0, islands = 1, preparation = 1;
     int steps = 300, warmup = 60;
     bool masks = true, profile = false, audit = false, replay = false;
@@ -228,10 +228,11 @@ QJsonObject run(SimulationSettings settings, const Options& options)
 {
     const bool ballCase=options.scenario.startsWith("ball-");
     const bool skill=options.scenario=="dribble-flat" || options.scenario=="dribble-chip";
-    const bool crowded=options.scenario.startsWith("crowded-");
+    const bool pushing=options.scenario=="pushing-6";
+    const bool crowded=pushing || options.scenario.startsWith("crowded-");
     const bool group=options.scenario.startsWith("group-");
     const int robots=ballCase ? 0 : skill ? 1 : group ? options.scenario.section('-',1).toInt() :
-        options.scenario.endsWith("16") ? 16 : 11;
+        options.scenario.endsWith("16") ? 16 : options.scenario.endsWith("-6") ? 6 : 11;
     settings.value_Robots_Count=robots; settings.value_DeltaTime=tick;
     RobotsFormation formation(FORMATION_INSIDE_1,&settings);
     SSLWorld world(nullptr,&settings,&formation,&formation);
@@ -254,8 +255,18 @@ QJsonObject run(SimulationSettings settings, const Options& options)
     // Resolve first-step team headings before capturing any fixed link pose.
     for (int i=0; i<robots*2; ++i) world.robots[i]->step();
     if (crowded || group) for (int i=0; i<robots*2; ++i) {
-        world.robots[i]->setXY((i%4)*(group ? 0.35 : 0.185)-0.6,
-                              (i/4)*(group ? 0.35 : 0.185)-0.6);
+        if (pushing || (crowded && robots==6)) {
+            // Six per team in a non-overlapping 4x3 grid. In the pushing case
+            // each team faces the other and keeps driving into the shared front.
+            const int team=i/robots, id=i%robots;
+            const int column=pushing ? (team ? 2+id%2 : 1-id%2) : i%4;
+            const int row=pushing ? id/2 : i/4;
+            world.robots[i]->setXY((column-1.5)*0.185,(row-1)*0.185);
+            if (pushing) world.robots[i]->setDir(team ? 180 : 0);
+        } else {
+            world.robots[i]->setXY((i%4)*(group ? 0.35 : 0.185)-0.6,
+                                  (i/4)*(group ? 0.35 : 0.185)-0.6);
+        }
     }
     if (skill) {
         world.robots[0]->setXY(0,0); world.robots[1]->setXY(3,3);
@@ -294,9 +305,9 @@ QJsonObject run(SimulationSettings settings, const Options& options)
         for (int i=0; i<robots*2; ++i) {
             const bool idle=options.scenario.startsWith("idle-") ||
                 (options.scenario.startsWith("stopstart-") && (frame/30)%2==0);
-            world.robots[i]->setSpeed(idle ? 0 : skill ? 0.3 : group && i>=robots ? -0.15 : 0.15,
-                                     idle || skill || group ? 0 : (i%2 ? 1 : -1)*0.05,
-                                     idle || skill || group ? 0 : 0.1);
+            world.robots[i]->setSpeed(idle ? 0 : pushing ? 0.5 : skill ? 0.3 : group && i>=robots ? -0.15 : 0.15,
+                                     idle || skill || group || pushing ? 0 : (i%2 ? 1 : -1)*0.05,
+                                     idle || skill || group || pushing ? 0 : 0.1);
         }
     };
     struct FrozenBody {
@@ -450,7 +461,7 @@ int main(int argc,char** argv)
             else return 2;
         }
     }
-    const QStringList scenarios={"spaced-11","spaced-16","crowded-11","crowded-16",
+    const QStringList scenarios={"spaced-6","crowded-6","pushing-6","spaced-11","spaced-16","crowded-11","crowded-16",
         "idle-11","stopstart-11","group-4","group-8","group-11","group-16","ball-flight","ball-rolling",
         "ball-spin","dribble-flat","dribble-chip"};
     if (!scenarios.contains(options.scenario) || options.helpers>16 || !options.islands ||
@@ -460,6 +471,7 @@ int main(int argc,char** argv)
         (options.replay && (options.scenario.startsWith("ball-") || options.scenario.startsWith("dribble-"))) ||
         (options.perfControl.isEmpty()!=options.perfAck.isEmpty())) return 2;
     ConfigWidget config(false);
+    if (options.scenario.endsWith("-6")) config.v_Division->setString("Division B");
     auto settings=config.simulationSettings();
     if (!dInitODE2(dInitFlagManualThreadCleanup) || !dAllocateODEDataForThread(dAllocateMaskAll)) return 2;
     int status=0;
