@@ -7,13 +7,11 @@ cmake --install "$build_dir" --prefix "$stage"
 app="$stage/grSim.app"
 qt_prefix="$(brew --prefix qt@5)"
 "$qt_prefix/bin/macdeployqt" "$app" -always-overwrite -verbose=2
-codesign --force --deep --sign - "$app"
-codesign --verify --deep --strict "$app"
 test "$(lipo -archs "$app/Contents/MacOS/grSim")" = arm64
 test -f "$app/Contents/Resources/config/Parsian.ini"
 test -f "$app/Contents/PlugIns/platforms/libqcocoa.dylib"
 
-# Reject non-system runtime dependencies outside the relocated application.
+# Remove unused Homebrew build search paths before signing, then reject external dependencies.
 python3 - "$app" <<'PY'
 import pathlib, re, subprocess, sys
 app = pathlib.Path(sys.argv[1])
@@ -36,13 +34,15 @@ for path in app.rglob("*"):
         if "LC_RPATH" in block:
             rpath = re.search(r"(?m)^\s+path\s+(\S+)", block)
             if rpath and rpath.group(1).startswith(("/opt/", "/usr/local/", "/Users/")):
-                raise SystemExit(f"External runtime search path in {path}: {rpath.group(1)}")
+                subprocess.check_call(["install_name_tool", "-delete_rpath", rpath.group(1), str(path)])
     for line in subprocess.check_output(["otool", "-L", str(path)], text=True).splitlines()[1:]:
         dependency = line.strip().split(" (", 1)[0]
         if dependency.startswith("/") and not dependency.startswith(("/System/Library/", "/usr/lib/")):
             raise SystemExit(f"External runtime dependency in {path}: {dependency}")
 print("PASS relocated bundle dependency audit")
 PY
+codesign --force --deep --sign - "$app"
+codesign --verify --deep --strict "$app"
 
 mkdir -p dist
 archive="$PWD/dist/grSim-macos-arm64-${MACOSX_DEPLOYMENT_TARGET:-15.0}.zip"
