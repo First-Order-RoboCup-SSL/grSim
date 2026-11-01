@@ -40,12 +40,29 @@ jobs:
       - uses: actions/checkout@v6
       - name: "Install dependencies"
         run: brew install cmake pkg-config qt@5
-      - name: "Build"
+      - name: "Build Apple Silicon application and tests"
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "15.0"
         run: |
           qt_prefix="$(brew --prefix qt@5)"
           export PATH="$qt_prefix/bin:$PATH"
-          export CMAKE_PREFIX_PATH="$qt_prefix${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
-          make
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$qt_prefix" -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" \
+            -DBUILD_ODE=ON -DBUILD_TESTING=ON -DGRSIM_MACOSX_BUNDLE=ON
+          cmake --build build -j 3
+      - name: "Run native macOS regressions and OpenGL smoke check"
+        run: ctest --test-dir build --output-on-failure
+      - name: "Package and run relocated Apple Silicon app"
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "15.0"
+        run: bash tests/package_macos.sh build
+      - name: "Upload Apple Silicon application"
+        uses: actions/upload-artifact@v4
+        with:
+          name: grSim-arm64-${{ matrix.os }}
+          path: dist/grSim-macos-arm64-15.0.zip
+          if-no-files-found: error
 
 # Windows build does not work currently, see https://github.com/RoboCup-SSL/grSim/issues/183
 #  build-windows:

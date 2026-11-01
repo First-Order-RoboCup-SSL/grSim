@@ -35,6 +35,20 @@ Copyright (C) 2011, Parsian Robotic Center (eew.aut.ac.ir/~parsian/grsim)
     v_##name->addItem(str);
 
 
+// Resolve resources relative to the executable, without changing the process CWD.
+static QString robotConfigDirectory()
+{
+    const QDir executable(QCoreApplication::applicationDirPath());
+    for (const QString& relative : {QString("../Resources/config"), QString("../config"),
+                                    QString("../share/grSim/config")}) {
+        const QDir candidate(executable.absoluteFilePath(relative));
+        if (!candidate.entryList(QStringList() << "*.ini", QDir::Files).isEmpty())
+            return candidate.absolutePath();
+    }
+    qWarning("Robot configuration files were not found beside the application");
+    return executable.absoluteFilePath("../config");
+}
+
 ConfigWidget::ConfigWidget(bool persist, const QString& settingsPath)
     : persistSettings(persist), settingsFile(settingsPath.isEmpty()
           ? QDir::homePath() + QString("/.grsim.xml") : settingsPath) {
@@ -199,14 +213,7 @@ ConfigWidget::ConfigWidget(bool persist, const QString& settingsPath)
     ADD_ENUM(StringEnum,BlueTeam,blueteam,"Blue Team");
     ADD_ENUM(StringEnum,YellowTeam,yellowteam,"Yellow Team");
 
-    auto config_path = "/../config/";
-#ifdef HAVE_LINUX
-    bool grSim_launch_from_system_dir = (qApp->applicationDirPath().indexOf(QDir::homePath()) == -1);
-    if (grSim_launch_from_system_dir)
-      config_path = "/../share/grSim/config/";
-#endif
-    QDir dir;
-    dir.setCurrent(qApp->applicationDirPath() + config_path);
+    QDir dir(robotConfigDirectory());
     dir.setNameFilters(QStringList() << "*.ini");
     dir.setSorting(QDir::Size | QDir::Reversed);
     QFileInfoList list = dir.entryInfoList();
@@ -273,14 +280,7 @@ void ConfigWidget::loadRobotsSettings()
 
 void ConfigWidget::loadRobotSettings(QString team)
 {
-    auto config_path = "/../config/";
-#ifdef HAVE_LINUX
-    bool grSim_launch_from_system_dir = (qApp->applicationDirPath().indexOf(QDir::homePath()) == -1);
-    if (grSim_launch_from_system_dir)
-      config_path = "/../share/grSim/config/";
-#endif
-
-    QString ss = qApp->applicationDirPath()+QString(config_path)+QString("%1.ini").arg(team);
+    const QString ss = QDir(robotConfigDirectory()).filePath(QString("%1.ini").arg(team));
     robot_settings = new QSettings(ss, QSettings::IniFormat);
     robotSettings.RobotCenterFromKicker = robot_settings->value("Geometery/CenterFromKicker", 0.073).toDouble();
     robotSettings.RobotRadius = robot_settings->value("Geometery/Radius", 0.09).toDouble();

@@ -168,3 +168,30 @@ Try adding -DBUILD_ODE=TRUE to build ODE from source instead of using the system
 ## Notes on the performance
 
 When running grSim, check the FPS in the status bar. If it is running at **60 FPS** or higher, everything is ok. Otherwise check the graphics card's driver installation and OpenGL settings.
+
+
+## Apple Silicon application (macOS 15 or later)
+
+The macOS CI jobs build native arm64 applications on macOS 15 and 26. Each job
+runs the simulator regressions and the real application's rendering/UDP smoke
+check, then uploads a ZIP containing a relocated grSim.app with Qt and robot
+configuration files. Download the artifact from the successful Build workflow,
+extract it, and open grSim.app.
+
+To build locally with Xcode Command Line Tools and Homebrew:
+
+    brew install cmake pkg-config qt@5
+    cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5)" \
+      -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
+      -DBUILD_ODE=ON -DBUILD_TESTING=ON -DGRSIM_MACOSX_BUNDLE=ON
+    cmake --build build -j 3
+    ctest --test-dir build --output-on-failure
+    bash tests/package_macos.sh build
+
+The packaged app uses ad-hoc signing; Developer ID signing and notarization
+are not configured. The runtime check exercises normal/Low Spec OpenGL images,
+robot configuration and textures, advancing vision packets, robot commands and
+feedback, motion and clean worker shutdown. It does not establish visual fidelity
+or performance on every Apple Silicon model. Intel/universal builds are not
+claimed. Normal builds can disable the bundle with GRSIM_MACOSX_BUNDLE=OFF.

@@ -6,6 +6,7 @@ ExternalProject_Add(ode_external
     GIT_REPOSITORY    https://bitbucket.org/odedevs/ode.git
     GIT_TAG           0.16.4
     CMAKE_ARGS
+                      ${GRSIM_EXTERNAL_PLATFORM_ARGS}
                       # ODE 0.16.4 requests policies removed by CMake 4.
                       -DCMAKE_POLICY_VERSION_MINIMUM=3.5
                       -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>

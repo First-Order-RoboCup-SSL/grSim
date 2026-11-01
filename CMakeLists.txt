@@ -28,6 +28,15 @@ endif()
 
 include(GNUInstallDirs)
 
+# Keep native Apple builds and their external dependencies on the same target.
+set(GRSIM_EXTERNAL_PLATFORM_ARGS)
+if(APPLE)
+    list(APPEND GRSIM_EXTERNAL_PLATFORM_ARGS
+        "-DCMAKE_OSX_ARCHITECTURES:STRING=${CMAKE_OSX_ARCHITECTURES}"
+        "-DCMAKE_OSX_DEPLOYMENT_TARGET:STRING=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+endif()
+option(GRSIM_MACOSX_BUNDLE "Build grSim as a macOS application bundle." ${APPLE})
+
 set(app ${CMAKE_PROJECT_NAME})
 # create the target before the sources list is known so that we can call
 # add_dependencies(<target> external_proj)
@@ -110,7 +119,7 @@ if(NOT VARTYPES_FOUND)
   include(ExternalProject)
   
   # The bundled dependency still requests policies removed by CMake 4.
-  set(VARTYPES_CMAKE_ARGS "-DVARTYPES_BUILD_STATIC=ON;-DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>;-DCMAKE_POLICY_VERSION_MINIMUM=3.5")
+  set(VARTYPES_CMAKE_ARGS "-DVARTYPES_BUILD_STATIC=ON;-DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>;-DCMAKE_POLICY_VERSION_MINIMUM=3.5;${GRSIM_EXTERNAL_PLATFORM_ARGS}")
   if(NOT "${CMAKE_TOOLCHAIN_FILE}" STREQUAL "")
     set(VARTYPES_CMAKE_ARGS "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE};${VARTYPES_CMAKE_ARGS}")
   endif()
@@ -239,7 +248,6 @@ set(HEADERS
 
 # files to be compiled
 set(srcs
-    ${CONFIG_FILES}
     ${PROTO_CPP}
     ${PROTO_H}
     ${RESOURCES}
@@ -247,8 +255,6 @@ set(srcs
     ${SOURCES}
 )
 
-file(GLOB CONFIG_FILES "config/*.ini")
-set_source_files_properties(${CONFIG_FILES}  PROPERTIES MACOSX_PACKAGE_LOCATION "config")
 
 set(CORE_SOURCES ${srcs})
 list(REMOVE_ITEM CORE_SOURCES src/main.cpp)
@@ -262,12 +268,34 @@ foreach(dependency vartypes_external protobuf_external ode_external)
     endif()
 endforeach()
 target_sources(${app} PRIVATE src/main.cpp)
-install(TARGETS ${app} DESTINATION bin)
+install(TARGETS ${app} BUNDLE DESTINATION . RUNTIME DESTINATION bin)
+if(APPLE AND GRSIM_MACOSX_BUNDLE)
+    file(GLOB CONFIG_FILES "config/*.ini")
+    set_source_files_properties(${CONFIG_FILES} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/config")
+    set(app_icon "${PROJECT_SOURCE_DIR}/resources/icons/grsim.icns")
+    set_source_files_properties("${app_icon}" PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
+    target_sources(${app} PRIVATE ${CONFIG_FILES} "${app_icon}")
+    set_target_properties(${app} PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_GUI_IDENTIFIER "org.robocup-ssl.grsim"
+        MACOSX_BUNDLE_ICON_FILE "grsim.icns"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${VERSION}")
+endif()
 target_link_libraries(${app} grSim_core)
 
 option(BUILD_TESTING "Build simulator regression tests." OFF)
 if(BUILD_TESTING)
     enable_testing()
+    # Exercise the actual application executable, including a relocated bundle.
+    target_sources(${app} PRIVATE tests/application_smoke.cpp)
+    target_compile_definitions(${app} PRIVATE GRSIM_BUILD_SMOKE_TEST)
+    add_test(NAME application_smoke COMMAND $<TARGET_FILE:${app}> --smoke-test)
+    set_tests_properties(application_smoke PROPERTIES TIMEOUT 20 LABELS "opengl")
+    if(UNIX AND NOT APPLE)
+        set_tests_properties(application_smoke PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=xcb;LIBGL_ALWAYS_SOFTWARE=1")
+    endif()
     add_executable(grSim_timing_test tests/timing_regression.cpp)
     target_link_libraries(grSim_timing_test grSim_core)
     add_test(NAME timing_regression COMMAND grSim_timing_test)
@@ -322,18 +350,8 @@ if(BUILD_TESTING)
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 15)
 endif()
 
-if(APPLE AND CMAKE_MACOSX_BUNDLE)
-  # use CMAKE_MACOSX_BUNDLE if you want to build a mac bundle
-  set(MACOSX_BUNDLE_ICON_FILE "${PROJECT_SOURCE_DIR}/resources/icons/grsim.icns")
-  set(MACOSX_BUNDLE_SHORT_VERSION_STRING ${VERSION})
-  set(MACOSX_BUNDLE_VERSION ${VERSION})
-  set(MACOSX_BUNDLE_LONG_VERSION_STRING "Version ${VERSION}")
-  set(BUNDLE_APP ${PROJECT_SOURCE_DIR}/bin/${app}.app)
-  install(
-      CODE "
-      include(BundleUtilities)
-      fixup_bundle(\"${BUNDLE_APP}\"   \"\"   \"/opt/local/lib;/usr/local/lib\")"
-      COMPONENT Runtime)
+if(APPLE AND GRSIM_MACOSX_BUNDLE)
+  # Deploy Qt into the installed bundle with macdeployqt before distribution.
   set(CPACK_GENERATOR "DragNDrop" "TGZ")
 elseif(WIN32 AND CMAKE_WIN32_EXECUTABLE)
   # use CMAKE_WIN32_EXECUTABLE if you want to build a windows exe
@@ -361,7 +379,7 @@ if(UNIX)
     execute_process(COMMAND uname -p OUTPUT_VARIABLE ARCH)
     string(STRIP ${ARCH} ARCH)
     if(APPLE)
-        set(ARCH "osx-universal")
+        set(ARCH "macos-${CMAKE_SYSTEM_PROCESSOR}")
     endif()
 elseif(WIN32)
     set(ARCH "win32")
