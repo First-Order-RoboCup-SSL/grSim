@@ -11,50 +11,8 @@ test "$(lipo -archs "$app/Contents/MacOS/grSim")" = arm64
 test -f "$app/Contents/Resources/config/Parsian.ini"
 test -f "$app/Contents/PlugIns/platforms/libqcocoa.dylib"
 
-# Remove unused Homebrew build search paths before signing, then reject external dependencies.
-python3 - "$app" <<'PY'
-import pathlib, re, subprocess, sys
-app = pathlib.Path(sys.argv[1])
-for path in app.rglob("*"):
-    if not path.is_file() or path.is_symlink():
-        continue
-    if "Mach-O" not in subprocess.check_output(["file", "-b", str(path)], text=True):
-        continue
-    architectures = subprocess.check_output(["lipo", "-archs", str(path)], text=True).split()
-    if "arm64" not in architectures:
-        raise SystemExit(f"Missing arm64 slice: {path}")
-    identifiers = subprocess.check_output(["otool", "-D", str(path)], text=True).splitlines()[1:]
-    for identifier in identifiers:
-        if identifier.strip().startswith(("/opt/", "/usr/local/", "/Users/")):
-            subprocess.check_call(["install_name_tool", "-id", "@rpath/" + path.name, str(path)])
-    load_commands = subprocess.check_output(["otool", "-arch", "arm64", "-l", str(path)], text=True)
-    has_bundle_rpath = "@executable_path/../Frameworks" in load_commands
-    for block in load_commands.split("Load command "):
-        if "LC_BUILD_VERSION" in block or "LC_VERSION_MIN_MACOSX" in block:
-            minimum = re.search(r"(?m)^\s+(?:minos|version)\s+(\d+(?:\.\d+)*)", block)
-            if minimum:
-                version = tuple(map(int, minimum.group(1).split(".")))
-                if (version + (0, 0))[:2] > (15, 0):
-                    raise SystemExit(f"Requires newer macOS than 15.0: {path}: {minimum.group(1)}")
-        if "LC_RPATH" in block:
-            rpath = re.search(r"(?m)^\s+path\s+(\S+)", block)
-            if rpath and rpath.group(1).startswith(("/opt/", "/usr/local/", "/Users/")):
-                subprocess.check_call(["install_name_tool", "-delete_rpath", rpath.group(1), str(path)])
-    if not has_bundle_rpath:
-        subprocess.check_call(["install_name_tool", "-add_rpath", "@executable_path/../Frameworks", str(path)])
-    identifiers = set(subprocess.check_output(["otool", "-D", str(path)], text=True).splitlines()[1:])
-    for line in subprocess.check_output(["otool", "-L", str(path)], text=True).splitlines()[1:]:
-        dependency = line.strip().split(" (", 1)[0]
-        if dependency in identifiers:
-            continue  # LC_ID_DYLIB is an identifier, not a dependency.
-        if dependency.startswith("@rpath/"):
-            bundled = app/"Contents"/"Frameworks"/dependency[len("@rpath/"):]
-            if not bundled.is_file():
-                raise SystemExit(f"Missing bundled runtime dependency in {path}: {dependency}")
-        if dependency.startswith("/") and not dependency.startswith(("/System/Library/", "/usr/lib/")):
-            raise SystemExit(f"External runtime dependency in {path}: {dependency}")
-print("PASS relocated bundle dependency audit")
-PY
+# Complete transitive dependencies before removing development search paths.
+python3 tests/deploy_macos.py "$app" "$(brew --prefix)" "$qt_prefix"
 codesign --force --deep --sign - "$app"
 codesign --verify --deep --strict "$app"
 
