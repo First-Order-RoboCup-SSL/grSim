@@ -14,14 +14,17 @@ GrSim depends on:
 - [pkg-config](https://www.freedesktop.org/wiki/Software/pkg-config/)
 - [OpenGL](https://www.opengl.org)
 - [Qt5 Development Libraries](https://www.qt.io)
-- [Open Dynamics Engine (ODE)](http://www.ode.org)
+- [Open Dynamics Engine (ODE)](https://www.ode.org/) 0.16.6 or newer, double precision
 - [VarTypes Library](https://github.com/jpfeltracco/vartypes) forked from [Szi's Vartypes](https://github.com/szi/vartypes)
 - [Google Protobuf](https://github.com/google/protobuf)
 - [Boost development libraries](http://www.boost.org/) (needed by VarTypes)
 
-**Note:** It's necessary to compile ODE in double precision. This is default when installing the ODE binaries in Ubuntu. However, if you are compiling ODE from source (e.g on Mac OS), please make sure to enable the double precision during the configuration step: `./configure --enable-double-precision`.
-
-
+grSim uses a compatible system ODE when available. Otherwise, CMake downloads and
+builds the pinned 0.16.6 release in double precision. Pass `-DBUILD_ODE=ON` to
+select this bundled build explicitly. It also enables ODE's threading interface
+and collision thread-local storage for independent concurrent worlds. The first
+build needs Git and access to the upstream repository. Installing a distribution's
+ODE package is optional when using the bundled build.
 
 ## Run from pre-build packages
 ### Installing from Arch Linux package manager
@@ -126,7 +129,7 @@ $ cd build
 Run CMake to generate the makefile (note: if you proceed with the installation, grSim will be installed into directory chosen, by default `/usr/local`):
 
 ```bash
-$ cmake -DCMAKE_INSTALL_PREFIX=/usr/local ..
+$ cmake -DCMAKE_INSTALL_PREFIX=/usr/local -DCMAKE_BUILD_TYPE=Release -DBUILD_ODE=ON ..
 ```
 
 Then compile the program:
@@ -163,7 +166,38 @@ grSim will be — by default — installed on the `/usr/local` directory.
 
 If you face any problem regarding of updating the grsim version, you can try removing the `grsim.xml`.
 If grSim crashes almost instantly with some ODE error the issue might by your ODE version.
-Try adding -DBUILD_ODE=TRUE to build ODE from source instead of using the system dependency.
+Try adding `-DBUILD_ODE=ON` to build the pinned ODE dependency from source.
+
+## Ball physics defaults
+
+Ground rolling/spin resistance applies through ball-ground contacts. Under
+Physics → Ball, **Ball rolling deceleration (m/s^2)** defaults to 0.35 m/s².
+Spin resistance and held-ball traction retain the Ball-ground friction control;
+the published rolling model follows the rolling-deceleration setting.
+Slip and linear/angular damping default to zero. A one-time migration replaces
+the old unused defaults (slip 1 and damping 0.004); other custom values are kept.
+Nonzero body damping affects flight as well as ground motion.
+
+## Experimental ODE helper threads
+
+Physics and networking already run on a simulation worker independently of the
+display. ODE helper threads are a separate experiment and are disabled by default.
+To test two helpers with the bundled build, launch from the repository root with:
+
+```bash
+GRSIM_ODE_THREADS=2 ./bin/grSim  # Linux
+GRSIM_ODE_THREADS=2 ./bin/grSim.app/Contents/MacOS/grSim  # macOS bundle
+```
+
+`GRSIM_ODE_THREADS` accepts 0 to 16 helpers. Zero runs ODE stepping on the simulation
+worker alone. Collision detection stays on that worker; helpers process independent
+constraint islands. Robot contacts can join islands and reduce parallelism. The
+solver and preparation within each island stay serial in this experiment.
+
+Helper scheduling can change subsequent contact ordering, so crowded trajectories
+can diverge. Helper mode does not guarantee equivalent trajectories or better
+performance. Leave it disabled for reproducible simulations unless evaluated
+against the intended workload.
 
 ## Notes on the performance
 
@@ -191,7 +225,8 @@ To build locally with Xcode Command Line Tools and Homebrew:
     bash tests/package_macos.sh build
 
 The packaged app uses ad-hoc signing; Developer ID signing and notarization
-are not configured. The runtime check exercises normal/Low Spec OpenGL images,
+are not configured. Browser downloads may require
+[Open Anyway](https://support.apple.com/en-us/102445). The runtime check exercises normal/Low Spec OpenGL images,
 robot configuration and textures, advancing vision packets, robot commands and
 feedback, motion and clean worker shutdown. It does not establish visual fidelity
 or performance on every Apple Silicon model. Intel/universal builds are not

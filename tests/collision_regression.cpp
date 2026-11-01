@@ -2,8 +2,16 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdarg>
 #include "configwidget.h"
 #include "sslworld.h"
+
+static unsigned lcpErrors = 0;
+static void recordOdeMessage(int code, const char* format, va_list arguments)
+{
+    if (code == d_ERR_LCP) ++lcpErrors;
+    else { std::vfprintf(stderr, format, arguments); std::fputc('\n', stderr); }
+}
 
 static bool check(bool passed, const char* description)
 {
@@ -35,6 +43,8 @@ static bool checkRobot(SimulationSettings settings, int team, double heading)
     for (int i = 0; i < 200; ++i) world.p->step(1.0/300.0);
     // Hold the chassis still to measure ball penetration rather than robot pushback.
     dBodySetKinematic(robot->chassis->body);
+    dBodySetLinearVel(robot->chassis->body,0,0,0);
+    dBodySetAngularVel(robot->chassis->body,0,0,0);
     world.p->setGravity(0);
     const auto* position = dBodyGetPosition(robot->chassis->body);
     const double centerX = position[0], centerY = position[1];
@@ -55,23 +65,34 @@ static bool checkRobot(SimulationSettings settings, int team, double heading)
                    "existing chassis-to-wall contact remains available") && passed;
     dGeomSetPosition(wall->geom, oldWall[0], oldWall[1], oldWall[2]);
 
-    for (double side : {90.0, 180.0, 270.0}) {
-        const double angle = (heading + side) * M_PI / 180;
-        const double x = std::cos(angle), y = std::sin(angle);
-        const double start = radius + ballRadius + 0.03;
-        placeBall(world, centerX + x*start, centerY + y*start, ballRadius);
-        dBodySetLinearVel(world.ball->body, -0.6*x, -0.6*y, 0);
-        double closest = start;
-        for (int i = 0; i < 90; ++i) {
-            world.p->step(1.0/300.0);
-            const auto* ball = dBodyGetPosition(world.ball->body);
-            closest = std::min(closest, (ball[0]-centerX)*x + (ball[1]-centerY)*y);
+    auto sideImpacts = [&](double height) {
+        bool blockedAll = true;
+        for (double side : {90.0, 180.0, 270.0}) {
+            const double angle = (heading + side) * M_PI / 180;
+            const double x = std::cos(angle), y = std::sin(angle);
+            const double start = radius + ballRadius + 0.03;
+                placeBall(world, centerX + x*start, centerY + y*start, height);
+            dBodySetLinearVel(world.ball->body, -0.6*x, -0.6*y, 0);
+            double closest = start;
+            for (int i = 0; i < 90; ++i) {
+                world.p->step(1.0/300.0);
+                const auto* ball = dBodyGetPosition(world.ball->body);
+                closest = std::min(closest, (ball[0]-centerX)*x + (ball[1]-centerY)*y);
+            }
+            const bool blocked = closest >= radius + ballRadius - 0.002;
+            std::printf("%s team=%d heading=%.0f side=%.0f height=%.2fmm closest=%.2fmm expected=%.2fmm\n",
+                        blocked ? "PASS" : "FAIL", team, heading, side, height*1000, closest*1000, (radius+ballRadius)*1000);
+            blockedAll = blocked && blockedAll;
         }
-        const bool blocked = closest >= radius + ballRadius - 0.002;
-        std::printf("%s team=%d heading=%.0f side=%.0f closest=%.2fmm expected=%.2fmm\n",
-                    blocked ? "PASS" : "FAIL", team, heading, side, closest*1000, (radius+ballRadius)*1000);
-        passed = blocked && passed;
-    }
+
+        return blockedAll;
+    };
+    // Separate the geometry-only fixture from an unloaded rolling constraint.
+    passed = sideImpacts(position[2]) && passed;
+    // Retain ground-level impacts under a real normal load as well.
+    world.p->setGravity(settings.Gravity());
+    passed = sideImpacts(ballRadius) && passed;
+    world.p->setGravity(0);
 
     const double yaw = heading * M_PI / 180, x = std::cos(yaw), y = std::sin(yaw);
     const auto* kicker = dBodyGetPosition(robot->kicker->box->body);
@@ -154,6 +175,8 @@ int main(int argc, char** argv)
     settings.yellowSettings.RobotCenterFromKicker = 0.068;
     settings.yellowSettings.RobotHeight = 0.138;
     dInitODE2(0);
+    const auto previousMessageHandler = dGetMessageHandler();
+    dSetMessageHandler(recordOdeMessage);
     bool passed = true;
     for (int team : {0, 1})
         for (double heading : {0.0, 90.0})
@@ -165,6 +188,8 @@ int main(int argc, char** argv)
         for (double heading : {0.0, 90.0})
             passed = checkRobot(settings, 0, heading) && passed;
     }
+    passed = check(lcpErrors == 0, "contact fixtures complete without LCP solver errors") && passed;
+    dSetMessageHandler(previousMessageHandler);
     dCloseODE();
     return passed ? 0 : 1;
 }

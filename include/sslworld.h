@@ -48,6 +48,15 @@ Copyright (C) 2011, Parsian Robotic Center (eew.aut.ac.ir/~parsian/grsim)
 #define WALL_COUNT 10
 
 class RobotsFormation;
+// Alternate values support controlled offline experiments without changing
+// networking or personal settings. Legacy friction is only a comparison mode.
+struct PhysicsStepOptions {
+    unsigned substeps = 5;
+    unsigned quickStepIterations = 0;
+    bool legacyBallFriction = false;
+    bool finiteWheelRotation = false;
+};
+
 class SendingPacket {
     public:
     SendingPacket(SSL_WrapperPacket* _packet,int _t);
@@ -62,6 +71,9 @@ private:
     int frame_num;
     dReal last_dt;
     dReal sim_time = 0;
+    dSurfaceParameters ballGroundSurface{};
+    bool legacyBallFrictionActive = false;
+    static bool ballGroundContact(dGeomID, dGeomID, PSurface*, int);
     QList<SendingPacket*> sendQueue;
     bool lastInfraredState[TEAM_COUNT][MAX_ROBOT_COUNT]{};
     KickStatus lastKickState[TEAM_COUNT][MAX_ROBOT_COUNT]{};
@@ -79,6 +91,10 @@ public:
     SSLWorld(QObject* parent, SimulationSettings* _cfg, RobotsFormation *form1, RobotsFormation *form2);
     ~SSLWorld() override;
     void stepSimulation(dReal dt);
+    void stepPhysics(dReal dt, const PhysicsStepOptions& options = PhysicsStepOptions(),
+                     PWorld::StepStatistics* statistics = nullptr);
+    // Apply the same ball material, mass and optional damping on startup/edit.
+    void updateBallPhysics();
     std::shared_ptr<SceneSnapshot> snapshot(quint64 generation) const;
     SSL_WrapperPacket* generatePacket(int cam_id=0);
     void addFieldLinesArcs(SSL_GeometryFieldSize *field);

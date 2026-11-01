@@ -143,6 +143,7 @@ public:
   DEF_VALUE(double,Double,BallRadius)
   DEF_VALUE(double,Double,BallMass)
   DEF_VALUE(double,Double,BallFriction)
+  DEF_VALUE(double,Double,BallRollingDeceleration)
   DEF_VALUE(double,Double,BallSlip)
   DEF_VALUE(double,Double,BallBounce)
   DEF_VALUE(double,Double,BallBounceVel)

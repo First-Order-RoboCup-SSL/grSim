@@ -91,22 +91,30 @@ find_package(Qt5 COMPONENTS Core Widgets OpenGL Network REQUIRED)
 list(APPEND libs Qt5::Core Qt5::Widgets Qt5::OpenGL Qt5::Network)
 
 # ODE
+find_package(Threads REQUIRED)
+list(APPEND libs Threads::Threads)
+option(BUILD_ODE "Build the bundled double-precision ODE dependency." OFF)
+set(GRSIM_ODE_MIN_VERSION 0.16.6)
 if(BUILD_ODE)
   include(BuildODE)
   add_dependencies(${app} ode_external)
 else()
   if(WIN32)
-    find_package(ODE CONFIG)
+    find_package(ODE ${GRSIM_ODE_MIN_VERSION} QUIET CONFIG)
+    if(ODE_FOUND AND NOT ODE_DOUBLE_PRECISION)
+      set(ODE_FOUND FALSE)
+    endif()
     set(ODE_LIB_NAME ODE::ODE)
   else()
-    find_package(ODE)
+    find_package(ODE ${GRSIM_ODE_MIN_VERSION} QUIET)
     set(ODE_LIB_NAME ode::ode)
   endif()
 
   if(ODE_FOUND)
+    message(STATUS "Using system ODE ${ODE_VERSION}")
     list(APPEND libs ${ODE_LIB_NAME})
   else()
-    # if ODE could not be found just build it
+    # Older and single-precision system libraries cannot satisfy this build.
     include(BuildODE)
     add_dependencies(${app} ode_external)
   endif()
@@ -348,6 +356,38 @@ if(BUILD_TESTING)
     add_test(NAME geometry_regression COMMAND grSim_geometry_test)
     set_tests_properties(geometry_regression PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 15)
+    add_test(NAME worker_regression_ode_threads COMMAND grSim_worker_test)
+    set_tests_properties(worker_regression_ode_threads PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;GRSIM_ODE_THREADS=2" TIMEOUT 30)
+    add_executable(grSim_ode_test tests/ode_regression.cpp)
+    target_link_libraries(grSim_ode_test grSim_core)
+    add_test(NAME ode_regression COMMAND grSim_ode_test)
+    set_tests_properties(ode_regression PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 180)
+    add_executable(grSim_collision_filtering_test tests/collision_filtering_regression.cpp)
+    target_link_libraries(grSim_collision_filtering_test grSim_core)
+    add_test(NAME collision_filtering_regression COMMAND grSim_collision_filtering_test)
+    set_tests_properties(collision_filtering_regression PROPERTIES TIMEOUT 30)
+    add_executable(grSim_physics_defaults_test tests/physics_defaults_regression.cpp)
+    target_link_libraries(grSim_physics_defaults_test grSim_core)
+    add_test(NAME physics_defaults_regression COMMAND grSim_physics_defaults_test)
+    set_tests_properties(physics_defaults_regression PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+    add_executable(grSim_physics_experiments tests/physics_experiments.cpp)
+    target_link_libraries(grSim_physics_experiments grSim_core)
+    add_executable(grSim_ode_performance_experiments tests/ode_performance_experiments.cpp)
+    target_link_libraries(grSim_ode_performance_experiments grSim_core)
+    find_program(GRSIM_PYTHON3_EXECUTABLE python3)
+    if(GRSIM_PYTHON3_EXECUTABLE)
+        add_test(NAME collision_filtering_trajectories
+            COMMAND ${GRSIM_PYTHON3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/check_collision_filtering.py
+                    $<TARGET_FILE:grSim_ode_performance_experiments>)
+        set_tests_properties(collision_filtering_trajectories PROPERTIES TIMEOUT 180)
+        add_test(NAME physics_analytic_regression
+            COMMAND ${GRSIM_PYTHON3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/check_physics_experiments.py
+                    $<TARGET_FILE:grSim_physics_experiments>)
+        set_tests_properties(physics_analytic_regression PROPERTIES TIMEOUT 60)
+    endif()
 endif()
 
 if(APPLE AND GRSIM_MACOSX_BUNDLE)
@@ -396,7 +436,9 @@ set(CPACK_RESOURCE_FILE_README "${CMAKE_BINARY_DIR}/README.txt")
 #set(CPACK_RESOURCE_FILE_WELCOME "${CMAKE_SOURCE_DIR}/WELCOME.txt")
 set(CPACK_PACKAGE_VERSION ${VERSION})
 # Debian based specific
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "libode1 (>=0.11), vartypes (>=0.7.0)")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "vartypes (>=0.7.0)")
+# Derive shared-library dependencies, including ODE only for a system build.
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 if(FLAVOR)
     set(CPACK_PACKAGE_FILE_NAME "${CMAKE_PROJECT_NAME_LOWER}_${CPACK_PACKAGE_VERSION}-${FLAVOR}_${ARCH}")
 else()

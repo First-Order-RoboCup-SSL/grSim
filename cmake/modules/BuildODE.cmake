@@ -1,26 +1,40 @@
-# build ODE, because some versions of it cause grSim to segfault somewhere
-# could be because in some packages the double precision is turned off
 include(ExternalProject)
+find_package(Threads REQUIRED)
 
+set(ode_build_type "${CMAKE_BUILD_TYPE}")
+if(NOT ode_build_type)
+  set(ode_build_type Release)
+endif()
+
+# Pin the 0.16.6 release, including its threading interface and collision TLS.
 ExternalProject_Add(ode_external
-    GIT_REPOSITORY    https://bitbucket.org/odedevs/ode.git
-    GIT_TAG           0.16.4
+    GIT_REPOSITORY    https://github.com/odedevs/ode.git
+    GIT_TAG           a5fc0bc282703ab34d7d3d2500bafae7428eeaa9
+    UPDATE_DISCONNECTED TRUE
     CMAKE_ARGS
                       ${GRSIM_EXTERNAL_PLATFORM_ARGS}
-                      # ODE 0.16.4 requests policies removed by CMake 4.
+                      # Keep compatibility with the dependency on CMake 4.
                       -DCMAKE_POLICY_VERSION_MINIMUM=3.5
                       -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
+                      -DCMAKE_INSTALL_LIBDIR:PATH=${CMAKE_INSTALL_LIBDIR}
                       -DCMAKE_TOOLCHAIN_FILE:PATH=${CMAKE_TOOLCHAIN_FILE}
                       -DCMAKE_C_COMPILER:PATH=${CMAKE_C_COMPILER}
                       -DCMAKE_CXX_COMPILER:PATH=${CMAKE_CXX_COMPILER}
                       -DCMAKE_MAKE_PROGRAM:PATH=${CMAKE_MAKE_PROGRAM}
-                      # necessary, because it does not build the static libs if this is ON
+                      -DCMAKE_BUILD_TYPE:STRING=${ode_build_type}
+                      -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON
                       -DBUILD_SHARED_LIBS=OFF
-                      # grSim needs the library; ODE's demos fail to compile with Clang.
-                      -DODE_WITH_DEMOS=OFF
-                      # if this is OFF grSim just dies instantly and INSTALL.md says it should be ON
                       -DODE_DOUBLE_PRECISION=ON
-                      -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
+                      -DODE_WITH_DEMOS=OFF
+                      -DODE_WITH_TESTS=OFF
+                      -DODE_WITH_OU=ON
+                      -DODE_NO_THREADING_INTF=OFF
+                      -DODE_NO_BUILTIN_THREADING_IMPL=OFF
+                      -DODE_WIN32_LIB_OUTPUT_NAME_BASED_ON_FLOAT_SIZE=OFF
+                      -DODE_WIN32_STATIC_LIB_POSTFIX_DEBUG:STRING=
+                      -DODE_WIN32_STATIC_LIB_POSTFIX_MINSIZEREL:STRING=
+                      -DODE_WIN32_STATIC_LIB_POSTFIX_RELEASE:STRING=
+                      -DODE_WIN32_STATIC_LIB_POSTFIX_RELWITHDEBINFO:STRING=
   STEP_TARGETS install
 )
 
@@ -34,6 +48,15 @@ ExternalProject_Add_Step(ode_external out
 )
 
 ExternalProject_Get_Property(ode_external install_dir)
-set(ODE_LIBRARY "${install_dir}/${ODE_LIB_SUBPATH}")
-list(APPEND libs ${ODE_LIBRARY})
-target_include_directories(${app} PRIVATE "${install_dir}/include")
+# Imported include directories must exist before the external installation.
+file(MAKE_DIRECTORY "${install_dir}/include")
+add_library(ode::ode STATIC IMPORTED)
+set_target_properties(ode::ode PROPERTIES
+  IMPORTED_LOCATION "${install_dir}/${ODE_LIB_SUBPATH}"
+  INTERFACE_INCLUDE_DIRECTORIES "${install_dir}/include"
+  INTERFACE_COMPILE_DEFINITIONS dIDEDOUBLE
+  INTERFACE_LINK_LIBRARIES Threads::Threads
+)
+add_dependencies(ode::ode ode_external)
+list(APPEND libs ode::ode)
+message(STATUS "Building bundled ODE 0.16.6 (${ode_build_type}, double precision, threading enabled)")

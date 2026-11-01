@@ -33,7 +33,7 @@ grSim compiles on Linux (tested on Ubuntu and Arch Linux variants only) and Mac 
 - [pkg-config](https://freedesktop.org/wiki/Software/pkg-config/)
 - [OpenGL](https://www.opengl.org)
 - [Qt5 Development Libraries](https://www.qt.io)
-- [Open Dynamics Engine (ODE)](http://www.ode.org)
+- [Open Dynamics Engine (ODE)](https://www.ode.org/) 0.16.6+, double precision, with a pinned source fallback
 - [VarTypes Library](https://github.com/jpfeltracco/vartypes) forked from [Szi's Vartypes](https://github.com/szi/vartypes)
 - [Google Protobuf](https://github.com/google/protobuf)
 - [Boost development libraries](http://www.boost.org/) (needed by VarTypes)
@@ -84,6 +84,20 @@ Tests use temporary configuration values without reading or writing personal
 simulator settings. In the configuration tree, **Desired FPS** caps rendering and
 **ODE time step** sets the fixed physics step; their names remain stable for saved
 settings compatibility.
+
+The ODE regressions cover ball resistance, cylinder inertia, settings migration,
+collision-filtered contacts/trajectories, helper stepping and concurrent worlds.
+Helpers are disabled by default; see the
+[setup and limitations](INSTALL.md#experimental-ode-helper-threads).
+Ball physics defaults and migration are described in the
+[installation guide](INSTALL.md#ball-physics-defaults).
+
+For a repeatable physics-only benchmark after building the tests:
+
+    python3 tests/benchmark_ode.py bin/grSim_ode_test --repeats 3 --steps 300 --output /tmp/grsim-ode-benchmark.json
+
+This excludes rendering, networking and real-time throttling. Compare builds
+using the same geometry, physics settings and workload.
 
 Star History
 ------

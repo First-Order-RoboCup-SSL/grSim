@@ -139,16 +139,20 @@ ConfigWidget::ConfigWidget(bool persist, const QString& settingsPath)
     phys_vars->addChild(ballp_vars);
         ADD_VALUE(ballp_vars,Double,BallMass,0.043,"Ball mass");
         ADD_VALUE(ballp_vars,Double,BallFriction,0.05,"Ball-ground friction")
-        ADD_VALUE(ballp_vars,Double,BallSlip,1,"Ball-ground slip")
+        ADD_VALUE(ballp_vars,Double,BallRollingDeceleration,0.35,"Ball rolling deceleration (m/s^2)")
+        ADD_VALUE(ballp_vars,Double,BallSlip,0,"Ball-ground slip")
         ADD_VALUE(ballp_vars,Double,BallBounce,0.5,"Ball-ground bounce factor")
         ADD_VALUE(ballp_vars,Double,BallBounceVel,0.1,"Ball-ground bounce min velocity")
-        ADD_VALUE(ballp_vars,Double,BallLinearDamp,0.004,"Ball linear damping")
-        ADD_VALUE(ballp_vars,Double,BallAngularDamp,0.004,"Ball angular damping")
+        ADD_VALUE(ballp_vars,Double,BallLinearDamp,0,"Ball linear damping")
+        ADD_VALUE(ballp_vars,Double,BallAngularDamp,0,"Ball angular damping")
         ADD_VALUE(ballp_vars,Bool,BallProjectAirborne,true,"Project airborne balls")
+    auto contactBallDefaults = std::make_shared<VarBool>("Contact ball physics defaults", false);
+    contactBallDefaults->addFlags(VARTYPE_FLAG_HIDDEN);
+    ballp_vars->addChild(contactBallDefaults);
   VarListPtr ball_model_vars(new VarList("Models"));
   ballp_vars->addChild(ball_model_vars);
     ADD_VALUE(ball_model_vars,Double,BallModelTwoPhaseAccSlide,-14.0,"Straight-two-phase sliding acceleration")
-    ADD_VALUE(ball_model_vars,Double,BallModelTwoPhaseAccRoll,-0.7,"Straight-two-phase rolling acceleration")
+    ADD_VALUE(ball_model_vars,Double,BallModelTwoPhaseAccRoll,-0.35,"Straight-two-phase rolling acceleration")
     ADD_VALUE(ball_model_vars,Double,BallModelTwoPhaseKSwitch,0.7,"Straight-two-phase switch factor k")
     ADD_VALUE(ball_model_vars,Double,BallModelChipFixedLossDampingXyFirstHop,0.6,"Chip-fixed-loss damping in xy-direction for first hop")
     ADD_VALUE(ball_model_vars,Double,BallModelChipFixedLossDampingXyOtherHops,0.96,"Chip-fixed-loss damping in xy-direction for other hops")
@@ -183,7 +187,7 @@ ConfigWidget::ConfigWidget(bool persist, const QString& settingsPath)
                                  [&]() { fpsLoaded = true; });
     const auto stepRead = connect(v_DeltaTime.get(), &VarType::XMLwasRead, this,
                                   [&]() { stepLoaded = true; });
-    if (persistSettings)
+    if (persistSettings || !settingsPath.isEmpty())
         world=VarXML::read(world,settingsFile.toStdString());
     disconnect(fpsRead);
     disconnect(stepRead);
@@ -202,6 +206,18 @@ ConfigWidget::ConfigWidget(bool persist, const QString& settingsPath)
     migrateAlias("Physics Time Step (s)", v_DeltaTime, stepLoaded);
     const auto synchronization = worldp_vars->findChild("Synchronize ODE with OpenGL");
     if (synchronization) worldp_vars->removeChild(synchronization);
+
+    // Old startup ignored these stored defaults. Migrate them once, retaining
+    // other custom values and allowing users to select the old numbers again.
+    if (!contactBallDefaults->getBool()) {
+        if (BallSlip() == 1) v_BallSlip->setDouble(0);
+        if (BallLinearDamp() == 0.004) v_BallLinearDamp->setDouble(0);
+        if (BallAngularDamp() == 0.004) v_BallAngularDamp->setDouble(0);
+        contactBallDefaults->setBool(true);
+    }
+    v_BallRollingDeceleration->setMin(0);
+    v_BallModelTwoPhaseAccRoll->setDouble(-BallRollingDeceleration());
+    v_BallModelTwoPhaseAccRoll->addFlags(VARTYPE_FLAG_READONLY);
 
 
     std::string blueteam = v_BlueTeam->getString();
@@ -328,6 +344,7 @@ SimulationSettings ConfigWidget::simulationSettings()
     result.value_BallRadius = BallRadius();
     result.value_BallMass = BallMass();
     result.value_BallFriction = BallFriction();
+    result.value_BallRollingDeceleration = BallRollingDeceleration();
     result.value_BallSlip = BallSlip();
     result.value_BallBounce = BallBounce();
     result.value_BallBounceVel = BallBounceVel();
@@ -335,7 +352,6 @@ SimulationSettings ConfigWidget::simulationSettings()
     result.value_BallAngularDamp = BallAngularDamp();
     result.value_BallProjectAirborne = BallProjectAirborne();
     result.value_BallModelTwoPhaseAccSlide = BallModelTwoPhaseAccSlide();
-    result.value_BallModelTwoPhaseAccRoll = BallModelTwoPhaseAccRoll();
     result.value_BallModelTwoPhaseKSwitch = BallModelTwoPhaseKSwitch();
     result.value_BallModelChipFixedLossDampingXyFirstHop = BallModelChipFixedLossDampingXyFirstHop();
     result.value_BallModelChipFixedLossDampingXyOtherHops = BallModelChipFixedLossDampingXyOtherHops();
@@ -401,6 +417,7 @@ void ConfigWidget::applyRemoteSettings(const SimulationSettings& settings)
 
 void ConfigWidget::queueSettingsEdited()
 {
+    v_BallModelTwoPhaseAccRoll->setDouble(-BallRollingDeceleration());
     if (settingsNotificationPending) return;
     settingsNotificationPending = true;
     QTimer::singleShot(0, this, [this]() {
