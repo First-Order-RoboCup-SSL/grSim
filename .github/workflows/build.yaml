@@ -19,7 +19,7 @@ jobs:
       - name: "Update dependencies"
         run: sudo apt-get update
       - name: "Install dependencies"
-        run: sudo apt-get install -y build-essential cmake pkg-config qtbase5-dev libqt5opengl5-dev libgl1-mesa-dev libglu1-mesa-dev libprotobuf-dev protobuf-compiler libode-dev libboost-dev xvfb libgl1-mesa-dri
+        run: sudo apt-get install -y build-essential cmake pkg-config qtbase5-dev libqt5opengl5-dev libgl1-mesa-dev libglu1-mesa-dev libprotobuf-dev protobuf-compiler libode-dev libboost-dev libopenblas-dev xvfb libgl1-mesa-dri
       - name: "Build"
         run: make
       - name: "Build regression tests"

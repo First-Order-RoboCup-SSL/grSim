@@ -1,0 +1,71 @@
+--- a/ode/src/fastlsolve_impl.h
++++ b/ode/src/fastlsolve_impl.h
+@@ -30,6 +30,8 @@
+ #ifndef _ODE_FASTLSOLVE_IMPL_H_
+ #define _ODE_FASTLSOLVE_IMPL_H_
+
++#include "grsim_ode_math.h"
++
+
+ /* solve L*X=B, with B containing 1 right hand sides.
+  * L is an n*n lower triangular matrix with ones on the diagonal.
+@@ -45,6 +47,7 @@
+ void solveL1Straight (const dReal *L, dReal *B, unsigned rowCount, unsigned rowSkip)
+ {
+     dIASSERT(rowCount != 0);
++    if (grsim_ode::solveUnitLower(L, B, rowCount, rowSkip, b_stride, false)) return;
+
+     /* compute all 4 x 1 blocks of X */
+     unsigned blockStartRow = 0;
+--- a/ode/src/fastltsolve_impl.h
++++ b/ode/src/fastltsolve_impl.h
+@@ -31,6 +31,8 @@
+ #ifndef _ODE_FASTLTSOLVE_IMPL_H_
+ #define _ODE_FASTLTSOLVE_IMPL_H_
+
++#include "grsim_ode_math.h"
++
+
+ /* solve L^T * x=b, with b containing 1 right hand side.
+  * L is an n*n lower triangular matrix with ones on the diagonal.
+@@ -44,6 +46,7 @@
+ void solveL1Transposed(const dReal *L, dReal *B, unsigned rowCount, unsigned rowSkip)
+ {
+     dIASSERT(rowCount != 0);
++    if (grsim_ode::solveUnitLower(L, B, rowCount, rowSkip, b_stride, true)) return;
+
+     /* special handling for L and B because we're solving L1 *transpose* */
+     const dReal *lastLElement = L + (sizeint)(rowCount - 1) * (rowSkip + 1);
+--- a/ode/src/fastdot_impl.h
++++ b/ode/src/fastdot_impl.h
+@@ -25,11 +25,14 @@
+ #ifndef _ODE_FASTDOT_IMPL_H_
+ #define _ODE_FASTDOT_IMPL_H_
+
++#include "grsim_ode_math.h"
++
+
+ template<unsigned b_stride>
+ dReal calculateLargeVectorDot (const dReal *a, const dReal *b, unsigned n)
+ {
+     dReal sum = 0;
++    if (grsim_ode::dot(a, b, n, b_stride, sum)) return sum;
+     const dReal *a_end = a + (n & (int)(~3));
+     for (; a != a_end; b += 4 * b_stride, a += 4) {
+         dReal p0 = a[0], p1 = a[1], p2 = a[2], p3 = a[3];
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1074,3 +1074,13 @@
+ endif()
+
+ include(CPack)
++
++# grSim's optional CPU math backend; the solver and double precision are unchanged.
++option(GRSIM_ODE_USE_BLAS "Use CPU BLAS for large grSim ODE kernels" OFF)
++target_compile_definitions(ODE PRIVATE GRSIM_ODE_USE_BLAS=$<BOOL:${GRSIM_ODE_USE_BLAS}>)
++if(GRSIM_ODE_USE_BLAS)
++    if(GRSIM_ODE_BLAS_INCLUDE_DIR)
++        target_include_directories(ODE PRIVATE "${GRSIM_ODE_BLAS_INCLUDE_DIR}")
++    endif()
++    target_link_libraries(ODE PUBLIC "${GRSIM_ODE_BLAS_LIBRARY}")
++endif()
