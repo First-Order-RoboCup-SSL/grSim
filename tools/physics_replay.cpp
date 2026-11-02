@@ -2,6 +2,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
+#include <QXmlStreamReader>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -423,7 +424,7 @@ int main(int argc, char** argv)
                 throw std::runtime_error("Incompatible replay format or ODE version");
             seed = integer(recording, "seed", std::numeric_limits<unsigned>::max());
             ticks = integer(recording, "ticks", 1000000);
-            if (!ticks || !recording["events"].isArray() || !recording["initial"].isObject())
+            if (!recording["events"].isArray() || !recording["initial"].isObject())
                 throw std::runtime_error("Missing replay timeline");
             settings = loadSettings(recording["settings"].toObject());
         } else {
@@ -431,6 +432,15 @@ int main(int argc, char** argv)
                 QFile input(settingsFile);
                 if (!QFileInfo(settingsFile).isFile() || !input.open(QIODevice::ReadOnly))
                     throw std::runtime_error("Requested settings must be an existing readable regular file");
+                // VarXML silently keeps defaults when parsing fails. Validate
+                // explicit input first so a recording cannot use another setup.
+                QXmlStreamReader xml(&input);
+                if (!xml.readNextStartElement() || xml.qualifiedName() != QLatin1String("VarXML") ||
+                    !xml.namespaceUri().isEmpty())
+                    throw std::runtime_error("Requested settings must have a VarXML root");
+                while (!xml.atEnd()) xml.readNext();
+                if (xml.hasError())
+                    throw std::runtime_error("Requested settings contain invalid XML");
             }
             ConfigWidget config(false, settingsFile);
             if (settingsFile.isEmpty()) {
