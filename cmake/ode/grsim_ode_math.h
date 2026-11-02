@@ -23,8 +23,8 @@ inline bool solveUnitLower(const double* matrix, double* rhs, unsigned count,
                            unsigned rowSkip, unsigned rhsStride, bool transposed)
 {
 #if defined(GRSIM_ODE_USE_BLAS) && GRSIM_ODE_USE_BLAS
+    initializeMath();
     if (count >= 64) {
-        initializeMath();
         cblas_dtrsv(CblasRowMajor, CblasLower, transposed ? CblasTrans : CblasNoTrans,
                     CblasUnit, count, matrix, rowSkip, rhs, rhsStride);
         return true;
@@ -36,8 +36,8 @@ inline bool dot(const double* first, const double* second, unsigned count,
                 unsigned secondStride, double& result)
 {
 #if defined(GRSIM_ODE_USE_BLAS) && GRSIM_ODE_USE_BLAS
+    initializeMath();
     if (count >= 64) {
-        initializeMath();
         result = cblas_ddot(count, first, 1, second, secondStride);
         return true;
     }

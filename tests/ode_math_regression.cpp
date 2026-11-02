@@ -116,7 +116,13 @@ static void checkDot(unsigned count)
 int main()
 {
     try {
-        // First backend calls are concurrent, as with separate ODE worlds/islands.
+        double small[4]={1,2,3,4}, smallResult=777;
+        require(!grsim_ode::dot(small,small,1,1,smallResult) && smallResult==777,
+                "small dot must retain ODE arithmetic");
+#if GRSIM_ODE_USE_BLAS && !defined(__APPLE__)
+        require(openblas_get_num_threads()==1,"small kernels must configure one BLAS thread");
+#endif
+        // Backend calls from independent ODE worlds/islands are concurrent.
         std::string errors[8];
         std::vector<std::thread> threads;
         for (unsigned i=0; i<8; ++i) threads.emplace_back([&,i]() {
