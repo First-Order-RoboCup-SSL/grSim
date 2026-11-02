@@ -21,6 +21,7 @@ Copyright (C) 2011, Parsian Robotic Center (eew.aut.ac.ir/~parsian/grsim)
 
 #include <QMdiArea>
 #include <QElapsedTimer>
+#include "framepacer.h"
 
 #include <QLabel>
 
@@ -74,10 +75,11 @@ public slots:
 
     int robotIndex(int robot,int team);
 private:
-    int getRenderInterval();
     void updateGraphicsDeviceStatus();
     SimulationController* simulation;
     QTimer *renderTimer;
+    QElapsedTimer renderClock;
+    FramePacer framePacer;
     QTimer *uiTimer;
     GLWidget *glwidget;
 

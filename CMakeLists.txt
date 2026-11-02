@@ -226,6 +226,8 @@ set(SOURCES
 )
 
 set(HEADERS
+    include/framepacer.h
+    include/timingstats.h
     include/mainwindow.h
     include/glwidget.h
     include/graphics.h
@@ -331,6 +333,21 @@ if(BUILD_TESTING)
         set_tests_properties(rendering_regression_hidpi PROPERTIES
             ENVIRONMENT "QT_QPA_PLATFORM=xcb;LIBGL_ALWAYS_SOFTWARE=1;QT_SCALE_FACTOR=2"
             TIMEOUT 30 LABELS "opengl")
+    endif()
+    add_test(NAME frame_schedule_regression COMMAND grSim_timing_test --schedule)
+    set_tests_properties(frame_schedule_regression PROPERTIES TIMEOUT 5)
+    add_test(NAME render_cadence_regression COMMAND grSim_timing_test --cadence)
+    set_tests_properties(render_cadence_regression PROPERTIES TIMEOUT 15 LABELS "opengl")
+    if(UNIX AND NOT APPLE)
+        set_tests_properties(render_cadence_regression PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=xcb;LIBGL_ALWAYS_SOFTWARE=1")
+    endif()
+    add_test(NAME render_measurements_regression COMMAND grSim_timing_test --cadence)
+    set_tests_properties(render_measurements_regression PROPERTIES
+        TIMEOUT 15 LABELS "opengl" ENVIRONMENT "GRSIM_PROFILE_RENDERING=1")
+    if(UNIX AND NOT APPLE)
+        set_tests_properties(render_measurements_regression PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=xcb;LIBGL_ALWAYS_SOFTWARE=1;GRSIM_PROFILE_RENDERING=1")
     endif()
     add_test(NAME timing_rendering_regression COMMAND grSim_timing_test --rendering)
     set_tests_properties(timing_rendering_regression PROPERTIES TIMEOUT 30 LABELS "opengl")

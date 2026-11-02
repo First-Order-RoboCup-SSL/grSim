@@ -144,3 +144,15 @@ Kazunori Kimura and Jeremy Feltracco and Kenta Sato and Atousa Ahsani},
   howpublished = {\url{https://github.com/RoboCup-SSL/grSim/}}
 }
 ```
+
+
+Hover over the Render/Sim status to inspect recent frame intervals, drawing and
+swap times, simulation tick times and physics backlog. FPS counts submitted
+window frames, excluding screenshots; the display compositor controls presentation.
+The 60 FPS cap uses fixed deadlines and keeps showing the latest completed scene
+during physics lag.
+
+For optional GPU timing, launch with `GRSIM_PROFILE_RENDERING=1`. Results are
+collected asynchronously when the graphics context supports timer queries; the
+default leaves GPU queries disabled. CPU timings and bounded recent histories
+remain available in either mode.

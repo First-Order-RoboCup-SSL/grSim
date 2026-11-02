@@ -12,6 +12,9 @@
 #include <cmath>
 #include <cstdio>
 #include "mainwindow.h"
+#include "framepacer.h"
+#include "timingstats.h"
+#include <limits>
 #include "ssl_vision_wrapper.pb.h"
 #include "ssl_simulation_robot_control.pb.h"
 #include "ssl_simulation_robot_feedback.pb.h"
@@ -230,11 +233,99 @@ static bool scenario(MainWindow& window, GLWidget& view, quint16 controlPort, do
     return passed;
 }
 
+static bool checkSchedule()
+{
+    bool passed = true;
+    for (double fps : {1.0, 5.0, 59.94, 60.0, 120.0, 1000.0}) {
+        FramePacer schedule;
+        schedule.reset(0, fps);
+        qint64 now = 0;
+        unsigned frames = 0;
+        // Drive the same deadlines used by MainWindow with a synthetic clock.
+        while (now < 60000000000LL) {
+            const int delay = schedule.delayMilliseconds(now);
+            passed = delay >= 1 && delay <= 1000 && passed;
+            now += qint64(delay) * 1000000;
+            if (schedule.due(now)) { ++frames; schedule.advance(now); }
+        }
+        const bool count = std::abs(double(frames) - 60 * fps) <= 1;
+        passed = count && passed;
+        std::printf("%s deadline count %.2f FPS over 60 seconds: %u\n",
+                    count ? "PASS" : "FAIL", fps, frames);
+        // A blocked GUI drops missed render deadlines without a catch-up burst.
+        schedule.advance(now + 5000000000LL);
+        passed = !schedule.due(now + 5000000000LL) && passed;
+    }
+    for (double invalid : {0.0, -1.0, std::numeric_limits<double>::infinity(),
+                           std::numeric_limits<double>::quiet_NaN()}) {
+        FramePacer schedule;
+        schedule.reset(0, invalid);
+        passed = schedule.delayMilliseconds(0) == 17 && passed;
+    }
+    TimingWindow samples;
+    for (unsigned i = 1; i <= 240; ++i) samples.add(i);
+    samples.add(-1); samples.add(std::numeric_limits<double>::quiet_NaN());
+    const auto full = samples.summary();
+    passed = full.samples == 240 && full.medianMs == 120 && full.p95Ms == 228 &&
+             full.p99Ms == 238 && full.maximumMs == 240 && passed;
+    for (unsigned i = 0; i < 240; ++i) samples.add(2);
+    const auto wrapped = samples.summary();
+    passed = wrapped.samples == 240 && wrapped.p99Ms == 2 && passed;
+    std::printf("%s bounded timing histories, invalid FPS and stalled deadlines\n",
+                passed ? "PASS" : "FAIL");
+    return passed;
+}
+
+// Stop the producer before deliberately ageing its last completed snapshot.
+// This exercises the real renderTick policy without racing a running worker.
+static bool checkCadence(MainWindow& window, GLWidget& view)
+{
+    view.simulation->stop();
+    auto frozen = std::const_pointer_cast<SceneSnapshot>(view.scene());
+    if (!frozen) return false;
+    frozen->pendingTime = 0.5;
+    view.refreshSnapshot();
+    view.updateGL();
+    QCoreApplication::processEvents();
+    const auto tick = frozen->tick;
+    int frames = 0;
+    bool fractionalInterval = false, boundedTimer = true;
+    const auto frameConnection = QObject::connect(&view, &GLWidget::frameRendered,
+                                                  [&]() { ++frames; });
+    QTimer* render = nullptr;
+    for (auto* timer : window.findChildren<QTimer*>(QString(), Qt::FindDirectChildrenOnly))
+        if (timer->timerType() == Qt::PreciseTimer) render = timer;
+    if (!render) return false;
+    const auto timerConnection = QObject::connect(render, &QTimer::timeout, [&]() {
+        fractionalInterval = fractionalInterval || render->interval() < 17;
+        boundedTimer = boundedTimer && render->interval() > 0;
+    });
+    QEventLoop loop;
+    QTimer::singleShot(600, &loop, &QEventLoop::quit);
+    loop.exec();
+    QObject::disconnect(frameConnection);
+    QObject::disconnect(timerConnection);
+    const bool drawing = frames >= 5 && view.scene()->tick == tick;
+    std::printf("%s 60 FPS uses fractional deadlines without a zero-timer spin\n",
+                fractionalInterval && boundedTimer ? "PASS" : "FAIL");
+    std::printf("%s drawing continues from completed snapshots during physics lag (%d frames)\n",
+                drawing ? "PASS" : "FAIL", frames);
+    const auto timings = view.frameTimings();
+    const bool measured = timings.frames >= unsigned(frames) && timings.interval.samples > 0 &&
+        timings.scene.samples > 0 && timings.labels.samples > 0 && timings.paintAndSwap.samples > 0 &&
+        (!timings.gpuRequested || !timings.gpuSupported || timings.gpu.samples > 0);
+    std::printf("%s frame measurements; GPU requested=%d supported=%d samples=%u\n",
+                measured ? "PASS" : "FAIL", timings.gpuRequested, timings.gpuSupported, timings.gpu.samples);
+    return fractionalInterval && boundedTimer && drawing && measured;
+}
+
 int main(int argc, char** argv)
 {
+    if (argc > 1 && QByteArray(argv[1]) == "--schedule") return checkSchedule() ? 0 : 1;
     if (argc > 2 && QByteArray(argv[1]) == "--observe") return observe(argc, argv);
     if (argc > 1 && QByteArray(argv[1]) == "--check-observer") return checkObserver(argc, argv);
-    const bool rendering = argc > 1 && QByteArray(argv[1]) == "--rendering";
+    const bool cadence = argc > 1 && QByteArray(argv[1]) == "--cadence";
+    const bool rendering = cadence || (argc > 1 && QByteArray(argv[1]) == "--rendering");
     QApplication app(argc, argv);
     QUdpSocket reserve;
     if (!reserve.bind(QHostAddress(QHostAddress::LocalHost), 0)) return 2;
@@ -257,6 +348,11 @@ int main(int argc, char** argv)
     auto* view = window->findChild<GLWidget*>();
     if (!view) return 2;
     if (rendering && !view->isValid()) return 2;
+    if (cadence) {
+        const bool passed = checkCadence(*window, *view);
+        delete window;
+        return passed ? 0 : 1;
+    }
     bool passed = scenario(*window, *view, controlPort, 60, 0, rendering);
     passed = scenario(*window, *view, controlPort, 5, 0, rendering) && passed;
     passed = scenario(*window, *view, controlPort, 1, 0, rendering) && passed;

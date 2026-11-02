@@ -36,6 +36,8 @@ GLWidget::GLWidget(QWidget *parent, ConfigWidget* _cfg, SimulationController* co
     : QGLWidget(parent), cfg(_cfg), simulation(controller), renderer(this)
 {
     Q_INIT_RESOURCE(textures);
+    frameClock.start();
+    gpuTimingRequested = qEnvironmentVariableIntValue("GRSIM_PROFILE_RENDERING") == 1;
     state = CursorMode::STEADY;
     m_fbo = nullptr;
     selected = -1;
@@ -149,6 +151,7 @@ GLWidget::GLWidget(QWidget *parent, ConfigWidget* _cfg, SimulationController* co
 GLWidget::~GLWidget()
 {
     makeCurrent();
+    for (auto& query : gpuQueries) query.reset();
     delete m_fbo;
     renderer.graphics.clearTextures();
     doneCurrent();
@@ -401,17 +404,68 @@ void GLWidget::initializeGL()
         name.contains("swrast") || name.contains("swiftshader") ||
         name.contains("software") || name.contains("gdi generic") ||
         name.contains("microsoft basic render");
+    if (gpuTimingRequested) {
+        gpuTimingSupported = true;
+        for (auto& query : gpuQueries) {
+            query.reset(new QOpenGLTimerQuery());
+            if (!query->create()) { gpuTimingSupported = false; break; }
+        }
+        if (!gpuTimingSupported)
+            for (auto& query : gpuQueries) query.reset();
+    }
     if (snapshot) renderer.initialize(*snapshot);
 }
 void GLWidget::resizeGL(int width, int height) { glViewport(0, 0, width, height); }
 bool GLWidget::hasFramebufferObjects() const { return QGLFramebufferObject::hasOpenGLFramebufferObjects(); }
 bool GLWidget::hasFramebufferBlit() const { return QGLFramebufferObject::hasOpenGLFramebufferBlit(); }
 
+FrameTimings GLWidget::frameTimings() const
+{
+    FrameTimings result;
+    result.interval = intervalTimings.summary();
+    result.scene = sceneTimings.summary();
+    result.labels = labelTimings.summary();
+    result.paintAndSwap = paintTimings.summary();
+    result.gpu = gpuTimings.summary();
+    result.gpuRequested = gpuTimingRequested;
+    result.gpuSupported = gpuTimingSupported;
+    result.frames = submittedFrames;
+    return result;
+}
+
+void GLWidget::paintEvent(QPaintEvent* event)
+{
+    QElapsedTimer elapsed;
+    elapsed.start();
+    QGLWidget::paintEvent(event); // Includes Qt's automatic buffer swap.
+    if (!graphicsEnabled || !snapshot || !isValid()) return;
+    paintTimings.add(elapsed.nsecsElapsed() / 1e6);
+    const qint64 now = frameClock.nsecsElapsed();
+    if (previousFrame >= 0) intervalTimings.add((now - previousFrame) / 1e6);
+    previousFrame = now;
+    ++submittedFrames;
+    // Swap completion on the CPU is not proof of compositor presentation.
+    emit frameSubmitted();
+}
+
 void GLWidget::paintGL()
 {
     if (!graphicsEnabled) return;
     refreshSnapshot();
     if (!snapshot) return;
+    QElapsedTimer elapsed;
+    elapsed.start();
+    activeGpuQuery = -1;
+    if (gpuTimingSupported) {
+        for (unsigned i = 0; i < gpuQueries.size(); ++i) {
+            if (gpuPending[i] && gpuQueries[i]->isResultAvailable()) {
+                gpuTimings.add(gpuQueries[i]->waitForResult() / 1e6);
+                gpuPending[i] = false;
+            }
+            if (!gpuPending[i] && activeGpuQuery < 0) activeGpuQuery = int(i);
+        }
+        if (activeGpuQuery >= 0) gpuQueries[activeGpuQuery]->begin();
+    }
     auto& graphics = renderer.graphics;
     if (cammode == CameraMode::CURRENT_ROBOT_VIEW) {
         const auto* robot = robotSnapshot(robotIndex(Current_robot, Current_team));
@@ -452,6 +506,8 @@ void GLWidget::paintGL()
         if (fboSupported) QOpenGLContext::currentContext()->functions()->glBindFramebuffer(GL_FRAMEBUFFER, target);
         renderer.draw(*snapshot, fullW, fullH, quality, selected, showCursor, cursor, cursorRadius);
     }
+    sceneTimings.add(elapsed.nsecsElapsed() / 1e6);
+    elapsed.restart();
     if (quality.showRobotLabels) {
         QFont font;
         for (const auto& robot : snapshot->robots) {
@@ -470,6 +526,12 @@ void GLWidget::paintGL()
         if (blitSupported) functions->glBindFramebuffer(GL_READ_FRAMEBUFFER, readTarget);
     }
     glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+    labelTimings.add(elapsed.nsecsElapsed() / 1e6);
+    if (activeGpuQuery >= 0) {
+        gpuQueries[activeGpuQuery]->end();
+        gpuPending[activeGpuQuery] = true;
+        activeGpuQuery = -1;
+    }
     hasRendered = true;
     emit frameRendered();
 }

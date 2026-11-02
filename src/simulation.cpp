@@ -134,6 +134,8 @@ void SimulationWorker::connectSockets(const SimulationSettings* previous)
 void SimulationWorker::rebuildWorld()
 {
     delete world;
+    stepTimings = TimingWindow();
+    recentStepTimings = TimingSummary();
     RobotsFormation form(FORMATION_INSIDE_1, &settings);
     world = new SSLWorld(this, &settings, &form, &form);
     const QByteArray requestedThreads = qgetenv("GRSIM_ODE_THREADS");
@@ -225,7 +227,10 @@ void SimulationWorker::tick()
     int steps = 0;
     while (accumulator >= step && steps < 4 &&
            (steps == 0 || budget.nsecsElapsed() < 4000000)) {
+        QElapsedTimer stepClock;
+        stepClock.start();
         world->stepSimulation(step);
+        stepTimings.add(stepClock.nsecsElapsed() / 1e6);
         accumulator -= step;
         ++steps;
         ++stepsThisSecond;
@@ -233,6 +238,7 @@ void SimulationWorker::tick()
     const qint64 rate = rateClock.nsecsElapsed();
     if (rate >= 1000000000) {
         physicsHz = stepsThisSecond / (rate / 1e9);
+        recentStepTimings = stepTimings.summary();
         stepsThisSecond = 0;
         rateClock.restart();
     }
@@ -243,7 +249,11 @@ void SimulationWorker::tick()
 
 void SimulationWorker::publish()
 {
+    QElapsedTimer buildClock;
+    buildClock.start();
     auto snapshot = world->snapshot(generation);
+    snapshot->snapshotMs = buildClock.nsecsElapsed() / 1e6;
+    snapshot->stepTimings = recentStepTimings;
     snapshot->physicsHz = physicsHz;
     snapshot->pendingTime = accumulator + (clock.nsecsElapsed() - lastTick) / 1e9;
     snapshot->lagging = lag.update(snapshot->pendingTime, settings.DeltaTime(), clock.nsecsElapsed());

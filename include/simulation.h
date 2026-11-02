@@ -67,6 +67,8 @@ private:
     int stepsThisSecond = 0;
     bool initialized = false;
     LagMonitor lag;
+    TimingWindow stepTimings;
+    TimingSummary recentStepTimings;
 };
 
 // GUI-facing interface. All operations are queued; only snapshots cross back.
