@@ -363,6 +363,9 @@ if(BUILD_TESTING)
     add_test(NAME geometry_regression COMMAND grSim_geometry_test)
     set_tests_properties(geometry_regression PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 15)
+    add_test(NAME worker_ode_policy_regression COMMAND grSim_worker_test --ode-worker-policy)
+    set_tests_properties(worker_ode_policy_regression PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
     add_test(NAME worker_regression_ode_threads COMMAND grSim_worker_test)
     set_tests_properties(worker_regression_ode_threads PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;GRSIM_ODE_THREADS=2" TIMEOUT 30)

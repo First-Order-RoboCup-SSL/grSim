@@ -41,6 +41,7 @@ struct SceneSnapshot {
     std::vector<RenderPrimitive> primitives;
     std::vector<RobotSnapshot> robots;
     std::array<double, 3> ballPosition{{0, 0, 0}};
+    unsigned odeHelpers = 0;
 };
 
 using SceneSnapshotPtr = std::shared_ptr<const SceneSnapshot>;

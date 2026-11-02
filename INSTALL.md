@@ -178,26 +178,29 @@ Slip and linear/angular damping default to zero. A one-time migration replaces
 the old unused defaults (slip 1 and damping 0.004); other custom values are kept.
 Nonzero body damping affects flight as well as ground motion.
 
-## Experimental ODE helper threads
+## ODE CPU workers
 
-Physics and networking already run on a simulation worker independently of the
-display. ODE helper threads are a separate experiment and are disabled by default.
-To test two helpers with the bundled build, launch from the repository root with:
+Physics and networking run on a simulation worker independently of the display.
+For games with at least six robots per team and at least three available logical
+CPUs, the app automatically uses up to three ODE helpers, leaving one logical CPU
+available for other work. Smaller games and lower-core systems stay serial.
+
+Helpers process independent contact islands. Collision detection stays on the
+simulation worker; contacts that connect robots stay in the same island.
+Preparation and solving within each island remain serial, using the direct solver
+and the same five substeps, contact geometry and materials.
+
+GRSIM_ODE_THREADS explicitly overrides automatic selection, including after world
+resets. It accepts 0 to 16 helpers; zero runs stepping on the simulation worker alone.
 
 ```bash
-GRSIM_ODE_THREADS=2 ./bin/grSim  # Linux
-GRSIM_ODE_THREADS=2 ./bin/grSim.app/Contents/MacOS/grSim  # macOS bundle
+GRSIM_ODE_THREADS=0 ./bin/grSim  # explicit serial mode on Linux
+GRSIM_ODE_THREADS=2 ./bin/grSim.app/Contents/MacOS/grSim  # explicit macOS override
 ```
 
-`GRSIM_ODE_THREADS` accepts 0 to 16 helpers. Zero runs ODE stepping on the simulation
-worker alone. Collision detection stays on that worker; helpers process independent
-constraint islands. Robot contacts can join islands and reduce parallelism. The
-solver and preparation within each island stay serial in this experiment.
-
 Helper scheduling can change subsequent contact ordering, so crowded trajectories
-can diverge. Helper mode does not guarantee equivalent trajectories or better
-performance. Leave it disabled for reproducible simulations unless evaluated
-against the intended workload.
+can diverge numerically. Use GRSIM_ODE_THREADS=0 for reproducible comparisons.
+The offline performance harness selects workers explicitly with --helpers.
 
 ## CPU math kernels in bundled ODE
 
