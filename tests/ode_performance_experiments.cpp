@@ -20,6 +20,10 @@
 #include "configwidget.h"
 #include "sslworld.h"
 
+#ifndef GRSIM_ODE_MATH_BACKEND
+#define GRSIM_ODE_MATH_BACKEND "ODE"
+#endif
+
 namespace {
 using Clock = std::chrono::steady_clock;
 constexpr double tick = 1.0/60;
@@ -424,7 +428,7 @@ QJsonObject run(SimulationSettings settings, const Options& options)
     // serializing results so only a small stop-command boundary can be sampled.
     if (perfControl.is_open()) perfControl << "disable\n" << std::flush;
     for (auto link : links) dJointDestroy(link);
-    QJsonObject output{{"collision_model","chassis-hull-2026"}, {"ode_version",QString::fromLatin1(dODE_VERSION)},
+    QJsonObject output{{"collision_model","chassis-hull-2026"}, {"math_backend",GRSIM_ODE_MATH_BACKEND}, {"ode_version",QString::fromLatin1(dODE_VERSION)},
         {"configuration",QString::fromLatin1(dGetConfiguration())},
         {"scenario",options.scenario}, {"robots_per_team",robots}, {"masks",options.masks},
         {"default_filtering_enabled",defaultFiltering},

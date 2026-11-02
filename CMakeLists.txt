@@ -361,6 +361,44 @@ if(BUILD_TESTING)
     add_test(NAME worker_regression_ode_threads COMMAND grSim_worker_test)
     set_tests_properties(worker_regression_ode_threads PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;GRSIM_ODE_THREADS=2" TIMEOUT 30)
+    if(TARGET ode_external)
+        set(kernel_test_dir "${CMAKE_CURRENT_BINARY_DIR}/ode-kernel-tests")
+        set(kernel_test_headers "")
+        foreach(variant reference optimized)
+            foreach(kernel fastlsolve_impl.h fastltsolve_impl.h fastdot_impl.h)
+                list(APPEND kernel_test_headers "${kernel_test_dir}/${variant}_${kernel}")
+            endforeach()
+        endforeach()
+        add_custom_command(OUTPUT ${kernel_test_headers}
+            COMMAND "${CMAKE_COMMAND}"
+                "-DSOURCE_DIR=${GRSIM_BUNDLED_ODE_SOURCE_DIR}"
+                "-DOUTPUT_DIR=${kernel_test_dir}" "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
+                -P "${PROJECT_SOURCE_DIR}/cmake/ode/PrepareKernelTests.cmake"
+            DEPENDS ode_external "${PROJECT_SOURCE_DIR}/cmake/ode/PrepareKernelTests.cmake"
+                "${PROJECT_SOURCE_DIR}/cmake/ode/cpu-math.patch"
+                "${PROJECT_SOURCE_DIR}/cmake/ode/grsim_ode_math.h")
+        add_custom_target(grSim_ode_kernel_headers DEPENDS ${kernel_test_headers})
+        add_executable(grSim_ode_math_fallback_test tests/ode_math_regression.cpp)
+        add_dependencies(grSim_ode_math_fallback_test grSim_ode_kernel_headers)
+        set_target_properties(grSim_ode_math_fallback_test PROPERTIES AUTOMOC OFF AUTORCC OFF)
+        target_compile_definitions(grSim_ode_math_fallback_test PRIVATE GRSIM_ODE_USE_BLAS=0)
+        target_include_directories(grSim_ode_math_fallback_test PRIVATE "${kernel_test_dir}"
+            "${PROJECT_SOURCE_DIR}/cmake/ode")
+        target_link_libraries(grSim_ode_math_fallback_test Threads::Threads)
+        add_test(NAME ode_math_fallback_regression COMMAND grSim_ode_math_fallback_test)
+        set_tests_properties(ode_math_fallback_regression PROPERTIES TIMEOUT 30)
+        if(GRSIM_ODE_MATH_AVAILABLE)
+            add_executable(grSim_ode_math_test tests/ode_math_regression.cpp)
+            add_dependencies(grSim_ode_math_test grSim_ode_kernel_headers)
+            set_target_properties(grSim_ode_math_test PROPERTIES AUTOMOC OFF AUTORCC OFF)
+            target_compile_definitions(grSim_ode_math_test PRIVATE GRSIM_ODE_USE_BLAS=1)
+            target_include_directories(grSim_ode_math_test PRIVATE "${kernel_test_dir}"
+                "${PROJECT_SOURCE_DIR}/cmake/ode" ${GRSIM_ODE_MATH_INCLUDE_DIR})
+            target_link_libraries(grSim_ode_math_test ${GRSIM_ODE_MATH_LIBRARIES} Threads::Threads)
+            add_test(NAME ode_math_regression COMMAND grSim_ode_math_test)
+            set_tests_properties(ode_math_regression PROPERTIES TIMEOUT 30)
+        endif()
+    endif()
     add_executable(grSim_ode_test tests/ode_regression.cpp)
     target_link_libraries(grSim_ode_test grSim_core)
     add_test(NAME ode_regression COMMAND grSim_ode_test)

@@ -91,6 +91,8 @@ simulator settings. In the configuration tree, **Desired FPS** caps rendering an
 **ODE time step** sets the fixed physics step; their names remain stable for saved
 settings compatibility.
 
+Kernel regressions compare native CPU math and scalar fallback against the pinned
+ODE implementation, including equation residuals, strides and concurrent callers.
 The ODE regressions cover ball resistance, cylinder inertia, settings migration,
 collision-filtered contacts/trajectories, helper stepping and concurrent worlds.
 Helpers are disabled by default; see the

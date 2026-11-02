@@ -65,7 +65,7 @@ For Debian, or derivative
 ```
 sudo apt install git build-essential cmake pkg-config qtbase5-dev \
                    libqt5opengl5-dev libgl1-mesa-dev libglu1-mesa-dev \
-                   libprotobuf-dev protobuf-compiler libode-dev libboost-dev
+                   libprotobuf-dev protobuf-compiler libode-dev libboost-dev libopenblas-dev
 ```
 
 #### Mac OS X
@@ -198,6 +198,19 @@ Helper scheduling can change subsequent contact ordering, so crowded trajectorie
 can diverge. Helper mode does not guarantee equivalent trajectories or better
 performance. Leave it disabled for reproducible simulations unless evaluated
 against the intended workload.
+
+## CPU math kernels in bundled ODE
+
+The bundled ODE build uses double-precision Accelerate on macOS and OpenBLAS
+when available on other platforms for triangular solves and dot products with
+at least 64 entries. Small kernels retain ODE's implementation. These synchronous
+CPU calls keep the direct solver, collision shapes, materials and five substeps.
+OpenBLAS runs with one active math thread per calling ODE worker.
+
+On Ubuntu, install libopenblas-dev before configuring. CMake prints the selected
+backend; the performance harness reports it as math_backend. Set
+GRSIM_ODE_OPTIMIZED_MATH=OFF when configuring to compare the scalar fallback.
+A compatible system ODE is used without this bundled patch.
 
 ## Notes on the performance
 
