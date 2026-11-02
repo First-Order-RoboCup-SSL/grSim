@@ -100,6 +100,17 @@ MainWindow::MainWindow(QWidget *parent, ConfigWidget *config)
     statusBar()->addWidget(selectinglabel);
     statusBar()->addWidget(vanishlabel);
     statusBar()->addWidget(noiselabel);
+    graphicsDeviceLabel = new QLabel(tr("Graphics: initializing..."), this);
+    graphicsDeviceLabel->setObjectName("graphicsDeviceStatus");
+    graphicsDeviceLabel->setTextFormat(Qt::PlainText);
+    graphicsDeviceLabel->setMinimumWidth(150);
+    graphicsDeviceLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    statusBar()->addPermanentWidget(graphicsDeviceLabel, 1);
+    auto* physicsDeviceLabel = new QLabel(tr("Physics: CPU"), this);
+    physicsDeviceLabel->setObjectName("physicsProcessorStatus");
+    physicsDeviceLabel->setToolTip(tr("Physics runs on the CPU, separately from rendering."));
+    statusBar()->addPermanentWidget(physicsDeviceLabel);
+
     /* Menus */
 
     QMenu *fileMenu = new QMenu("&File");
@@ -208,7 +219,6 @@ MainWindow::MainWindow(QWidget *parent, ConfigWidget *config)
     uiTimer->start();
 
 
-    this->showMaximized();
     this->setWindowTitle("grSim");
 
     robotwidget->teamCombo->setCurrentIndex(0);
@@ -311,8 +321,28 @@ void MainWindow::recordRenderedFrame()
     ++m_renderFramesThisSecond;
 }
 
+void MainWindow::updateGraphicsDeviceStatus()
+{
+    const QString renderer = glwidget->graphicsRendererName();
+    QString label;
+    if (!glwidget->graphicsEnabled) label = tr("Graphics: disabled");
+    else if (renderer.isEmpty()) label = tr("Graphics: initializing...");
+    else if (glwidget->usesSoftwareRendering()) label = tr("Graphics: Software (CPU)");
+    else label = tr("Graphics: %1").arg(renderer);
+    graphicsDeviceLabel->setText(graphicsDeviceLabel->fontMetrics().elidedText(
+        label, Qt::ElideMiddle, graphicsDeviceLabel->width()));
+    graphicsDeviceLabel->setToolTip(
+        tr("Renderer: %1\nVendor: %2\nOpenGL: %3\n%4")
+            .arg(renderer.isEmpty() ? tr("Not initialized") : renderer,
+                 glwidget->graphicsRendererVendor(), glwidget->graphicsRendererVersion(),
+                 glwidget->usesSoftwareRendering()
+                     ? tr("Software rendering and physics run separately on the CPU.")
+                     : tr("Physics runs on the CPU, separately from rendering.")));
+}
+
 void MainWindow::updateUI()
 {
+    updateGraphicsDeviceStatus();
     const auto snapshot = glwidget->refreshSnapshot();
     if (!snapshot) return;
     const int index = robotIndex(glwidget->Current_robot, glwidget->Current_team);

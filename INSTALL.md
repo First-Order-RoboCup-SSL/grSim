@@ -224,6 +224,21 @@ A compatible system ODE is used without this bundled patch.
 When running grSim, check the FPS in the status bar. If it is running at **60 FPS** or higher, everything is ok. Otherwise check the graphics card's driver installation and OpenGL settings.
 
 
+### WSL graphics device
+
+The status bar reports the renderer from the active OpenGL context. If WSL uses
+llvmpipe/software rendering and you want to select an NVIDIA adapter, launch
+from the repository root with:
+
+```bash
+env -u LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER=d3d12 \
+  MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA ./bin/grSim
+```
+
+Check that the Graphics indicator names your NVIDIA GPU. This selects the
+graphics device for this launch; physics still runs on its separate CPU worker.
+
+
 ## Apple Silicon application (macOS 15 or later)
 
 The macOS CI jobs build native arm64 applications on macOS 15 and 26. Both jobs

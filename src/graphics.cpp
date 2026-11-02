@@ -40,6 +40,50 @@ const dReal sky_scale    = 1.0f;    // sky texture scale (1/size)
 const dReal sky_height   = 1.0f;    // sky height above viewpoint
 
 
+namespace {
+// Emit the same fan triangles explicitly. D3D12 has no native triangle-fan
+// topology; converting cached indexed fans can force a GPU-to-CPU index readback.
+// These cap vertices share one normal/material; texture coordinates vary per vertex.
+class TriangleFan {
+public:
+    explicit TriangleFan(bool textured = false) : textured(textured) { glBegin(GL_TRIANGLES); }
+    ~TriangleFan() { glEnd(); }
+    TriangleFan(const TriangleFan&) = delete;
+    TriangleFan& operator=(const TriangleFan&) = delete;
+
+    void texCoord(GLdouble s, GLdouble t)
+    {
+        textureS = s; textureT = t;
+        glTexCoord2d(s, t);
+    }
+
+    void vertexFloat(GLfloat x, GLfloat y, GLfloat z) { vertex(x, y, z); }
+
+    void vertex(GLdouble x, GLdouble y, GLdouble z)
+    {
+        const Vertex value{x, y, z, textureS, textureT};
+        if (count == 0) first = value;
+        else if (count > 1) {
+            emitVertex(first); emitVertex(previous); emitVertex(value);
+        }
+        previous = value;
+        ++count;
+    }
+
+private:
+    struct Vertex { GLdouble x, y, z, s, t; };
+    void emitVertex(const Vertex& value)
+    {
+        if (textured) glTexCoord2d(value.s, value.t);
+        glVertex3d(value.x, value.y, value.z);
+    }
+    bool textured;
+    unsigned count = 0;
+    GLdouble textureS = 0, textureT = 0;
+    Vertex first{}, previous{};
+};
+}
+
 CGraphics::CGraphics(QGLWidget* _owner)
 {
     owner = _owner;
@@ -784,15 +828,17 @@ void CGraphics::drawSSLGround(dReal SSL_FIELD_RAD,dReal SSL_FIELD_LENGTH,dReal S
         glEnd();
 
         //Penalty spots
-        glBegin(GL_POLYGON);
-        for(angle=0.0f; angle <= 2.0 * M_PI; angle+=anglestep)
-            glVertex3f(-fw + penx + cos(angle) * lw, 0.0f + sin(angle) * lw, epsilon);
-        glEnd();
+        {
+            TriangleFan fan;
+            for(angle=0.0f; angle <= 2.0 * M_PI; angle+=anglestep)
+                fan.vertexFloat(-fw + penx + cos(angle) * lw, 0.0f + sin(angle) * lw, epsilon);
+        }
 
-        glBegin(GL_POLYGON);
-        for(angle=0.0f; angle <= 2.0 * M_PI; angle+=anglestep)
-            glVertex3f(fw - penx + cos(angle) * lw, 0.0f + sin(angle) * lw, epsilon);
-        glEnd();
+        {
+            TriangleFan fan;
+            for(angle=0.0f; angle <= 2.0 * M_PI; angle+=anglestep)
+                fan.vertexFloat(fw - penx + cos(angle) * lw, 0.0f + sin(angle) * lw, epsilon);
+        }
 
         glEndList();
     }
@@ -834,22 +880,24 @@ void CGraphics::_drawBox ()
         glEnd();
 
         // top face
-        glBegin (GL_TRIANGLE_FAN);
-        glNormal3f (0,0,1);
-        glVertex3f (-lx,-ly,lz);
-        glVertex3f (lx,-ly,lz);
-        glVertex3f (lx,ly,lz);
-        glVertex3f (-lx,ly,lz);
-        glEnd();
+        {
+            TriangleFan fan;
+            glNormal3f (0,0,1);
+            fan.vertexFloat(-lx,-ly,lz);
+            fan.vertexFloat(lx,-ly,lz);
+            fan.vertexFloat(lx,ly,lz);
+            fan.vertexFloat(-lx,ly,lz);
+        }
 
         // bottom face
-        glBegin (GL_TRIANGLE_FAN);
-        glNormal3f (0,0,-1);
-        glVertex3f (-lx,-ly,-lz);
-        glVertex3f (-lx,ly,-lz);
-        glVertex3f (lx,ly,-lz);
-        glVertex3f (lx,-ly,-lz);
-        glEnd();
+        {
+            TriangleFan fan;
+            glNormal3f (0,0,-1);
+            fan.vertexFloat(-lx,-ly,-lz);
+            fan.vertexFloat(-lx,ly,-lz);
+            fan.vertexFloat(lx,ly,-lz);
+            fan.vertexFloat(lx,-ly,-lz);
+        }
 
         glEndList();
     }
@@ -963,17 +1011,18 @@ void CGraphics::drawCircle(dReal x0,dReal y0,dReal z0,dReal r)
     // draw top cap
     glShadeModel (GL_FLAT);
     ny=1; nz=0;		  // normal vector = (0,ny,nz)
-    glBegin (GL_TRIANGLE_FAN);
-    glNormal3d (0,0,1);
-    for (i=0; i<=n; i++) {
+    {
+        TriangleFan fan;
         glNormal3d (0,0,1);
-        glVertex3d (ny*r+x0,nz*r+y0,z0);
-        // rotate ny,nz
-        tmp = ca*ny - sa*nz;
-        nz = sa*ny + ca*nz;
-        ny = tmp;
+        for (i=0; i<=n; i++) {
+            glNormal3d (0,0,1);
+            fan.vertex(ny*r+x0,nz*r+y0,z0);
+            // rotate ny,nz
+            tmp = ca*ny - sa*nz;
+            nz = sa*ny + ca*nz;
+            ny = tmp;
+        }
     }
-    glEnd();
 }
 
 // draw a capped cylinder of length l and radius r, aligned along the x axis
@@ -1092,31 +1141,33 @@ static void compileCylinderGeometry(int n)
     // draw top cap
     glShadeModel (GL_FLAT);
     ny=1; nz=0;
-    glBegin (GL_TRIANGLE_FAN);
-    glNormal3d (0,0,1);
-    glVertex3d (0,0,l);
-    for (i=0; i<=n; i++) {
+    {
+        TriangleFan fan;
         glNormal3d (0,0,1);
-        glVertex3d (ny*r,nz*r,l);
-        tmp = ca*ny - sa*nz;
-        nz = sa*ny + ca*nz;
-        ny = tmp;
+        fan.vertex(0,0,l);
+        for (i=0; i<=n; i++) {
+            glNormal3d (0,0,1);
+            fan.vertex(ny*r,nz*r,l);
+            tmp = ca*ny - sa*nz;
+            nz = sa*ny + ca*nz;
+            ny = tmp;
+        }
     }
-    glEnd();
 
     // draw bottom cap
     ny=1; nz=0;
-    glBegin (GL_TRIANGLE_FAN);
-    glNormal3d (0,0,-1);
-    glVertex3d (0,0,-l);
-    for (i=0; i<=n; i++) {
+    {
+        TriangleFan fan;
         glNormal3d (0,0,-1);
-        glVertex3d (ny*r,nz*r,-l);
-        tmp = ca*ny + sa*nz;
-        nz = -sa*ny + ca*nz;
-        ny = tmp;
+        fan.vertex(0,0,-l);
+        for (i=0; i<=n; i++) {
+            glNormal3d (0,0,-1);
+            fan.vertex(ny*r,nz*r,-l);
+            tmp = ca*ny + sa*nz;
+            nz = -sa*ny + ca*nz;
+            ny = tmp;
+        }
     }
-    glEnd();
 }
 
 void CGraphics::_drawCylinder (bool lowLod)
@@ -1164,21 +1215,19 @@ static void compileTexturedCylinder(int sides, bool robot, int part)
             glEnd();
         }
     } else if (part == 1) {
-        glBegin(GL_TRIANGLE_FAN);
+        TriangleFan fan(true);
         glNormal3d(0, 0, 1);
         for (int i = first; i < (robot ? last + 1 : sides); ++i) {
             const double x = std::cos(i * angle), y = std::sin(i * angle);
-            glTexCoord2d(-0.5 * y + 0.5, 0.5 * x + 0.5);
-            glVertex3d(x, y, 0.5);
+            fan.texCoord(-0.5 * y + 0.5, 0.5 * x + 0.5);
+            fan.vertex(x, y, 0.5);
         }
-        glEnd();
     } else {
-        glBegin(GL_TRIANGLE_FAN);
+        TriangleFan fan;
         glNormal3d(0, 0, -1);
         // Reverse the same boundary to retain the chassis cutout on both caps.
         for (int i = last; i >= first; --i)
-            glVertex3d(std::cos(i * angle), std::sin(i * angle), -0.5);
-        glEnd();
+            fan.vertex(std::cos(i * angle), std::sin(i * angle), -0.5);
     }
 }
 
