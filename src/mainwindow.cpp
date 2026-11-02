@@ -108,7 +108,7 @@ MainWindow::MainWindow(QWidget *parent, ConfigWidget *config)
     statusBar()->addPermanentWidget(graphicsDeviceLabel, 1);
     auto* physicsDeviceLabel = new QLabel(tr("Physics: CPU"), this);
     physicsDeviceLabel->setObjectName("physicsProcessorStatus");
-    physicsDeviceLabel->setToolTip(tr("Physics runs on a CPU simulation thread, separate from rendering."));
+    physicsDeviceLabel->setToolTip(tr("Physics runs on the CPU, separately from rendering."));
     statusBar()->addPermanentWidget(physicsDeviceLabel);
 
     /* Menus */
@@ -336,8 +336,8 @@ void MainWindow::updateGraphicsDeviceStatus()
             .arg(renderer.isEmpty() ? tr("Not initialized") : renderer,
                  glwidget->graphicsRendererVendor(), glwidget->graphicsRendererVersion(),
                  glwidget->usesSoftwareRendering()
-                     ? tr("Software rendering uses the CPU; physics runs on a separate CPU thread.")
-                     : tr("Physics runs on a CPU thread, separate from rendering.")));
+                     ? tr("Software rendering and physics run separately on the CPU.")
+                     : tr("Physics runs on the CPU, separately from rendering.")));
 }
 
 void MainWindow::updateUI()
