@@ -77,8 +77,6 @@ private:
     QList<SendingPacket*> sendQueue;
     bool lastInfraredState[TEAM_COUNT][MAX_ROBOT_COUNT]{};
     KickStatus lastKickState[TEAM_COUNT][MAX_ROBOT_COUNT]{};
-    void processSimControl(const SimulatorCommand &simulatorCommand, SimulatorResponse &simulatorResponse);
-    void processRobotControl(const RobotControl &robotControl, RobotControlResponse &robotControlResponse, Team team);
     void processRobotSpec(const RobotSpecs &robotSpec) const;
     static void processRobotLimits(const RobotSpecs &robotSpec, RobotSettings *settings);
     static void processMoveCommand(RobotControlResponse &robotControlResponse, const RobotMoveCommand &robotCommand,
@@ -86,7 +84,10 @@ private:
     void releaseBallHolds() const;
     void processTeleportBall(SimulatorResponse &simulatorResponse, const TeleportBall &teleBall) const;
     static void processTeleportRobot(const TeleportRobot &teleBot, Robot *robot);
-public:    
+public:
+    // Apply decoded protocol commands between fixed steps, including offline replay.
+    void processRobotControl(const RobotControl &robotControl, RobotControlResponse &robotControlResponse, Team team);
+    void processSimControl(const SimulatorCommand &simulatorCommand, SimulatorResponse &simulatorResponse);
     dReal customDT;
     SSLWorld(QObject* parent, SimulationSettings* _cfg, RobotsFormation *form1, RobotsFormation *form2);
     ~SSLWorld() override;
