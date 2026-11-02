@@ -12,7 +12,6 @@ RUN apt-get update && apt-get install -y \
     libglu1-mesa-dev \
     libprotobuf-dev \
     protobuf-compiler \
-    libode-dev \
     libboost-dev
 
 WORKDIR /vartypes
@@ -34,7 +33,7 @@ COPY src /grsim/src
 COPY CMakeLists.txt README.md LICENSE.md /grsim/
 RUN mkdir build && \
     cd build && \
-    cmake -DCMAKE_INSTALL_PREFIX=/usr/local .. && \
+    cmake -DCMAKE_INSTALL_PREFIX=/usr/local -DCMAKE_BUILD_TYPE=Release -DBUILD_ODE=ON .. && \
     make && \
     make install
 
@@ -47,7 +46,6 @@ RUN apt-get update && apt-get install -y \
         tini \
         qt5-default \
         libqt5opengl5 \
-        libode8 \
         libprotobuf17 \
         # virtual display and VNC server
         x11vnc xvfb && \

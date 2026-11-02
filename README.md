@@ -33,7 +33,7 @@ grSim compiles on Linux (tested on Ubuntu and Arch Linux variants only) and Mac 
 - [pkg-config](https://freedesktop.org/wiki/Software/pkg-config/)
 - [OpenGL](https://www.opengl.org)
 - [Qt5 Development Libraries](https://www.qt.io)
-- [Open Dynamics Engine (ODE)](http://www.ode.org)
+- [Open Dynamics Engine (ODE)](https://www.ode.org/) 0.16.6+, double precision, with a pinned source fallback
 - [VarTypes Library](https://github.com/jpfeltracco/vartypes) forked from [Szi's Vartypes](https://github.com/szi/vartypes)
 - [Google Protobuf](https://github.com/google/protobuf)
 - [Boost development libraries](http://www.boost.org/) (needed by VarTypes)
@@ -78,12 +78,41 @@ outgoing vision packets, plus wall placement after live settings edits.
 Collision tests check side and rear ball contact, dribbler access, roller
 retention while stationary and moving, and flat/chip kicks for separate team
 sizes and rotated robots, including ball acquisition with recessed dribblers.
+Robot-pair regressions also cover side/rear pushing, rotated and different-sized
+robots, with serial and parallel ODE stepping. Robot contact spheres match the
+outer shell radius and attach directly to the chassis, avoiding an extra fixed
+body while preserving the previous combined mass and inertia. The kinematic
+ball/hull fixtures isolate wheel-ground and rolling constraints; dynamic physics
+and robot-pair tests retain the production defaults.
 The ball-contact hull keeps the body outline and cuts its front back when needed
 to reach the configured dribbler. Render quality does not change this shape.
 Tests use temporary configuration values without reading or writing personal
 simulator settings. In the configuration tree, **Desired FPS** caps rendering and
 **ODE time step** sets the fixed physics step; their names remain stable for saved
 settings compatibility.
+
+Kernel regressions compare native CPU math and scalar fallback against the pinned
+ODE implementation, including equation residuals, strides and concurrent callers.
+The ODE regressions cover ball resistance, cylinder inertia, settings migration,
+collision-filtered contacts/trajectories, helper stepping and concurrent worlds.
+The app selects CPU helpers automatically for large games on multicore machines;
+see the [worker policy and overrides](INSTALL.md#ode-cpu-workers).
+Ball physics defaults and migration are described in the
+[installation guide](INSTALL.md#ball-physics-defaults).
+
+For a repeatable physics-only benchmark after building the tests (6 v 6 by default):
+
+    python3 tests/benchmark_ode.py bin/grSim_ode_test --repeats 3 --steps 300 --output /tmp/grsim-ode-benchmark.json
+
+For sustained opposing-team contact on a Division B field:
+
+    QT_QPA_PLATFORM=offscreen ./bin/grSim_ode_performance_experiments --scenario pushing-6 --helpers 3 --islands 3 --steps 300
+
+The performance harness also provides spaced-6 and crowded-6; each uses twelve
+robots total. Add `--audit 1` to report maximum planar robot-shell overlap and
+contact/constraint diagnostics. The six-a-side regression rejects overlap above
+2 mm. These benchmarks exclude rendering, networking and real-time
+throttling. Compare builds using the same geometry, physics settings and workload.
 
 Star History
 ------

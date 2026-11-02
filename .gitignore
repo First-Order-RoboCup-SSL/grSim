@@ -9,3 +9,6 @@ Thumbs.db
 *.iml
 cmake-build-debug
 cmake-build-release
+
+# Local experiment reports, raw data and profiles.
+/docs/research/

@@ -71,14 +71,22 @@ void SimulationWorker::start(SimulationSettings value)
     Q_ASSERT(QThread::currentThread() == QObject::thread());
     {
         QMutexLocker lock(&odeMutex);
-        if (odeUsers++ == 0) dInitODE2(dInitFlagManualThreadCleanup);
+        if (odeUsers == 0 && !dInitODE2(dInitFlagManualThreadCleanup))
+            qFatal("Could not initialize ODE");
+        if (odeUsers > 0 && (!dCheckConfiguration("ODE_EXT_mt_collisions") ||
+                            !dCheckConfiguration("ODE_EXT_threading")))
+            qFatal("Concurrent worlds require ODE collision TLS and threading; configure BUILD_ODE=ON");
+        ++odeUsers;
     }
-    dAllocateODEDataForThread(dAllocateMaskAll);
+    if (!dCheckConfiguration("ODE_double_precision")) qFatal("grSim requires double-precision ODE");
+    if (!dAllocateODEDataForThread(dAllocateMaskAll)) qFatal("Could not allocate ODE worker data");
     initialized = true;
     settings = value;
     if (!std::isfinite(settings.DeltaTime()) || settings.DeltaTime() <= 0)
         settings.value_DeltaTime = 1.0 / 60.0;
     settings.value_Robots_Count = qBound(0, settings.Robots_Count(), int(MAX_ROBOT_COUNT));
+    if (!std::isfinite(settings.BallRollingDeceleration()) || settings.BallRollingDeceleration() < 0)
+        settings.value_BallRollingDeceleration = 0.35;
     settings.value_sendGeometryEvery = qMax(4, settings.sendGeometryEvery());
     connectSockets();
     rebuildWorld();
@@ -128,6 +136,21 @@ void SimulationWorker::rebuildWorld()
     delete world;
     RobotsFormation form(FORMATION_INSIDE_1, &settings);
     world = new SSLWorld(this, &settings, &form, &form);
+    const QByteArray requestedThreads = qgetenv("GRSIM_ODE_THREADS");
+    if (requestedThreads.isEmpty()) {
+        const int available = QThread::idealThreadCount();
+        // Large games can contain several independent contact islands. Keep
+        // one logical CPU available for the GUI and bound pool overhead.
+        const int helpers = settings.Robots_Count() >= 6 && available >= 3
+            ? qMin(3, available - 1) : 0;
+        if (helpers && !world->p->setThreadCount(unsigned(helpers)))
+            qWarning("Could not start automatic ODE helpers; using serial ODE stepping");
+    } else {
+        bool valid = false;
+        const int helpers = requestedThreads.toInt(&valid);
+        if (!valid || helpers < 0 || helpers > 16 || !world->p->setThreadCount(unsigned(helpers)))
+            qWarning("Could not enable GRSIM_ODE_THREADS; using serial ODE stepping");
+    }
     world->visionServer = visionServer;
     world->commandSocket = commandSocket;
     world->simControlSocket = simControlSocket;
@@ -152,8 +175,9 @@ void SimulationWorker::configure(SimulationSettingsEdit edit)
     appliedRevision = edit.revision;
     SimulationSettings value = edit.after;
     if (!std::isfinite(value.DeltaTime()) || value.DeltaTime() <= 0 ||
+        !std::isfinite(value.BallRollingDeceleration()) || value.BallRollingDeceleration() < 0 ||
         value.Robots_Count() < 0 || value.Robots_Count() > MAX_ROBOT_COUNT) {
-        logStatus("Invalid simulation timestep or robot count", QColor("red"));
+        logStatus("Invalid simulation timestep, rolling deceleration or robot count", QColor("red"));
         emit settingsChanged(settings, appliedRevision);
         return;
     }
@@ -170,23 +194,7 @@ void SimulationWorker::configure(SimulationSettingsEdit edit)
     else {
         if (previous.Gravity() != settings.Gravity())
             dWorldSetGravity(world->p->world, 0, 0, -settings.Gravity());
-        if (previous.BallMass() != settings.BallMass()) world->ball->setMass(settings.BallMass());
-        if (previous.BallLinearDamp() != settings.BallLinearDamp() || previous.BallAngularDamp() != settings.BallAngularDamp()) {
-            dBodySetLinearDampingThreshold(world->ball->body, 0.001);
-            dBodySetLinearDamping(world->ball->body, settings.BallLinearDamp());
-            dBodySetAngularDampingThreshold(world->ball->body, 0.001);
-            dBodySetAngularDamping(world->ball->body, settings.BallAngularDamp());
-        }
-        if (previous.BallFriction() != settings.BallFriction() ||
-            previous.BallSlip() != settings.BallSlip() || previous.BallBounce() != settings.BallBounce() ||
-            previous.BallBounceVel() != settings.BallBounceVel()) {
-            auto* surface = world->p->findSurface(world->ball, world->ground);
-            surface->surface.mode = dContactBounce | dContactApprox1 | dContactSlip1 | dContactSlip2;
-            surface->surface.mu = fric(settings.BallFriction());
-            surface->surface.bounce = settings.BallBounce();
-            surface->surface.bounce_vel = settings.BallBounceVel();
-            surface->surface.slip1 = surface->surface.slip2 = settings.BallSlip();
-        }
+        world->updateBallPhysics();
         publish();
     }
     if (timer) timer->setInterval(physicsInterval(settings.DeltaTime()));

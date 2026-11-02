@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QThread>
+#include <QWindow>
 #include <cstdio>
 #include <cstdlib>
 #include <set>
@@ -224,6 +225,12 @@ int main(int argc, char** argv)
         TestView fallback(config, view->simulation);
         fallback.resize(512, 512);
         fallback.show();
+        QElapsedTimer exposed;
+        exposed.start();
+        while ((!fallback.windowHandle() || !fallback.windowHandle()->isExposed()) &&
+               exposed.elapsed() < 2000) {
+            app.processEvents(); QThread::msleep(1);
+        }
         app.processEvents();
         fallback.allowBlit = false;
         config->v_LowSpecMode->setBool(true);

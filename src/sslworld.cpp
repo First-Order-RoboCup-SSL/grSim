@@ -23,6 +23,7 @@ Copyright (C) 2011, Parsian Robotic Center (eew.aut.ac.ir/~parsian/grsim)
 #include <QtNetwork>
 
 #include <QDebug>
+#include <stdexcept>
 
 #include "logger.h"
 
@@ -83,24 +84,59 @@ bool wheelCallBack(dGeomID o1,dGeomID o2,PSurface* s, int /*robots_count*/)
     return true;
 }
 
-bool ballCallBack(dGeomID o1,dGeomID o2,PSurface* s, int /*robots_count*/)
+bool SSLWorld::ballGroundContact(dGeomID, dGeomID, PSurface* s, int /*robots_count*/)
 {
     auto* world = static_cast<SSLWorld*>(s->callbackData);
-    if (world->ball->tag!=-1) //spinner adjusting
+    // A previous held-ball contact must not overwrite the free-ball material.
+    s->surface = world->ballGroundSurface;
+    s->usefdir1 = false;
+    std::fill(s->fdir1, s->fdir1 + 4, 0);
+    if (world->legacyBallFrictionActive) s->surface.mode &= ~dContactRolling;
+    const int holder = world->ball->tag;
+    if (holder >= 0 && holder < world->cfg->Robots_Count() * 2) //spinner adjusting
     {
         dReal x,y,z;
-        world->robots[world->ball->tag]->chassis->getBodyDirection(x,y,z);
+        world->robots[holder]->chassis->getBodyDirection(x,y,z);
         s->fdir1[0] = x;
         s->fdir1[1] = y;
         s->fdir1[2] = 0;
         s->fdir1[3] = 0;
         s->usefdir1 = true;
         s->surface.mode = dContactMu2 | dContactFDir1 | dContactSoftCFM;
-        s->surface.mu = world->cfg->BallFriction();
+        s->surface.mu = fric(world->cfg->BallFriction());
         s->surface.mu2 = 0.5;
         s->surface.soft_cfm = 0.002;
     }
     return true;
+}
+
+void SSLWorld::updateBallPhysics()
+{
+    ball->setMass(cfg->BallMass());
+    dBodySetLinearDampingThreshold(ball->body, 0.001);
+    dBodySetAngularDampingThreshold(ball->body, 0.001);
+    dBodySetLinearDamping(ball->body, cfg->BallLinearDamp());
+    dBodySetAngularDamping(ball->body, cfg->BallAngularDamp());
+
+    ballGroundSurface = {};
+    ballGroundSurface.mode = dContactBounce | dContactApprox1 | dContactRolling | dContactMu2;
+    // For a solid sphere, I/(m*R^2)=2/5 and a=rho*g/(1.4*R).
+    // Expose a directly so rolling can be tuned without changing sliding,
+    // spin resistance or tagged held-ball traction.
+    ballGroundSurface.mu = ballGroundSurface.mu2 = 1;
+    const dReal rho = cfg->Gravity() > 0 ?
+        1.4 * std::max(0.0, cfg->BallRollingDeceleration()) * cfg->BallRadius() / cfg->Gravity() : 0;
+    ballGroundSurface.rho = ballGroundSurface.rho2 = rho;
+    ballGroundSurface.rhoN = 2 * fric(cfg->BallFriction()) * cfg->BallRadius();
+    ballGroundSurface.bounce = cfg->BallBounce();
+    ballGroundSurface.bounce_vel = cfg->BallBounceVel();
+    if (cfg->BallSlip() > 0) {
+        ballGroundSurface.mode |= dContactSlip1 | dContactSlip2;
+        ballGroundSurface.slip1 = ballGroundSurface.slip2 = cfg->BallSlip();
+    }
+    auto* surface = p->findSurface(ball, ground);
+    surface->surface = ballGroundSurface;
+    surface->usefdir1 = false;
 }
 
 SSLWorld::SSLWorld(QObject* parent, SimulationSettings* _cfg, RobotsFormation *form1, RobotsFormation *form2) : QObject(parent) {
@@ -108,8 +144,9 @@ SSLWorld::SSLWorld(QObject* parent, SimulationSettings* _cfg, RobotsFormation *f
     cfg = _cfg;
     frame_num = 0;
     last_dt = cfg->DeltaTime();
-    p = new PWorld(0.05,9.81f,cfg->Robots_Count());
+    p = new PWorld(0.05,cfg->Gravity(),cfg->Robots_Count());
     ball = new PBall (0,0,0.5,cfg->BallRadius(),cfg->BallMass(), 1,0.7,0);
+    ball->tag = -1;
 
     ground = new PGround(cfg->Field_Rad(),cfg->Field_Length(),cfg->Field_Width(),cfg->Field_Penalty_Depth(),cfg->Field_Penalty_Width(),cfg->Field_Penalty_Point(),cfg->Field_Line_Width(),0);
     
@@ -250,9 +287,9 @@ SSLWorld::SSLWorld(QObject* parent, SimulationSettings* _cfg, RobotsFormation *f
 
     PSurface wheelswithground;
     PSurface* ball_ground = p->createSurface(ball,ground);
-    ball_ground->surface = ballwithwall.surface;
-    ball_ground->callback = ballCallBack;
+    ball_ground->callback = ballGroundContact;
     ball_ground->callbackData = this;
+    updateBallPhysics();
 
     PSurface ballwithkicker;
     ballwithkicker.surface.mode = dContactApprox1;
@@ -283,11 +320,29 @@ SSLWorld::SSLWorld(QObject* parent, SimulationSettings* _cfg, RobotsFormation *f
         {            
             if (k != j)
             {
-                p->createSurface(robots[k]->dummy,robots[j]->dummy); //seams ode doesn't understand cylinder-cylinder contacts, so I used spheres
+                p->createSurface(robots[k]->dummy,robots[j]->dummy); // one sphere per outer robot shell
                 p->createSurface(robots[k]->chassis,robots[j]->kicker->box);
             }
         }
     }
+    enum : unsigned long {
+        BallCategory = 1UL << 0, GroundCategory = 1UL << 1,
+        WallCategory = 1UL << 2, ChassisCategory = 1UL << 3,
+        DummyCategory = 1UL << 4, KickerCategory = 1UL << 5,
+        WheelCategory = 1UL << 6, HullCategory = 1UL << 7
+    };
+    p->setCollisionCategory(ball, BallCategory);
+    p->setCollisionCategory(ground, GroundCategory);
+    for (auto* wall : walls) p->setCollisionCategory(wall, WallCategory);
+    for (int k = 0; k < 2 * cfg->Robots_Count(); ++k) {
+        p->setCollisionCategory(robots[k]->chassis, ChassisCategory);
+        p->setCollisionCategory(robots[k]->ballHull, HullCategory);
+        p->setCollisionCategory(robots[k]->dummy, DummyCategory);
+        p->setCollisionCategory(robots[k]->kicker->box, KickerCategory);
+        for (auto* wheel : robots[k]->wheels)
+            p->setCollisionCategory(wheel->cyl, WheelCategory);
+    }
+    p->setCollisionFiltering(true);
     sendGeomCount = 0;
 
     // initialize robot state
@@ -324,6 +379,7 @@ std::shared_ptr<SceneSnapshot> SSLWorld::snapshot(quint64 generation) const
     result->generation = generation;
     result->tick = frame_num;
     result->simulationTime = sim_time;
+    result->odeHelpers = p->threadCount();
     result->settings = *cfg;
     result->primitives = p->renderPrimitives();
     const auto* position = dBodyGetPosition(ball->body);
@@ -346,39 +402,57 @@ void SSLWorld::stepSimulation(dReal dt) {
     if (customDT > 0) dt = customDT;
     else if (dt <= 0) dt = last_dt;
     last_dt = dt;
+    stepPhysics(dt);
+    sendVisionBuffer();
+    frame_num ++;
+}
 
-    int ballCollisionTry = 5;
-    for (int kk=0;kk < ballCollisionTry;kk++) {
-        const dReal* ballvel = dBodyGetLinearVel(ball->body);
-        dReal ballspeed = ballvel[0]*ballvel[0] + ballvel[1]*ballvel[1] + ballvel[2]*ballvel[2];
-        ballspeed = sqrt(ballspeed);
-        if (ballspeed > 0.01) {
-            dReal fk = cfg->BallFriction()*cfg->BallMass()*cfg->Gravity();
-            dReal ballfx = -fk*ballvel[0] / ballspeed;
-            dReal ballfy = -fk*ballvel[1] / ballspeed;
-            dReal ballfz = -fk*ballvel[2] / ballspeed;
-            dReal balltx = -ballfy*cfg->BallRadius();
-            dReal ballty = ballfx*cfg->BallRadius();
-            dReal balltz = 0;
-            dBodyAddTorque(ball->body,balltx,ballty,balltz);
-            dBodyAddForce(ball->body,ballfx,ballfy,ballfz);
-        } else {
-            dBodySetAngularVel(ball->body, 0, 0, 0);
-            dBodySetLinearVel(ball->body, 0, 0, 0);
+void SSLWorld::stepPhysics(dReal dt, const PhysicsStepOptions& options,
+                          PWorld::StepStatistics* statistics) {
+    if (!std::isfinite(dt) || dt <= 0 || !options.substeps)
+        throw std::invalid_argument("Invalid physics timestep");
+    legacyBallFrictionActive = options.legacyBallFriction;
+    for (unsigned kk=0; kk < options.substeps; ++kk) {
+        if (options.finiteWheelRotation) {
+            for (int k=0; k < cfg->Robots_Count() * 2; ++k) {
+                for (auto* wheel : robots[k]->wheels) {
+                    dVector3 axis;
+                    dJointGetHingeAxis(wheel->joint, axis);
+                    dBodySetFiniteRotationMode(wheel->cyl->body, 1);
+                    dBodySetFiniteRotationAxis(wheel->cyl->body, axis[0], axis[1], axis[2]);
+                }
+            }
         }
-        p->step(dt/ballCollisionTry);
+        if (options.legacyBallFriction) {
+            const dReal* ballvel = dBodyGetLinearVel(ball->body);
+            dReal ballspeed = ballvel[0]*ballvel[0] + ballvel[1]*ballvel[1] + ballvel[2]*ballvel[2];
+            ballspeed = sqrt(ballspeed);
+            if (ballspeed > 0.01) {
+                dReal fk = cfg->BallFriction()*cfg->BallMass()*cfg->Gravity();
+                dReal ballfx = -fk*ballvel[0] / ballspeed;
+                dReal ballfy = -fk*ballvel[1] / ballspeed;
+                dReal ballfz = -fk*ballvel[2] / ballspeed;
+                dReal balltx = -ballfy*cfg->BallRadius();
+                dReal ballty = ballfx*cfg->BallRadius();
+                dReal balltz = 0;
+                dBodyAddTorque(ball->body,balltx,ballty,balltz);
+                dBodyAddForce(ball->body,ballfx,ballfy,ballfz);
+            } else {
+                dBodySetAngularVel(ball->body, 0, 0, 0);
+                dBodySetLinearVel(ball->body, 0, 0, 0);
+            }
+        }
+        if (!p->step(dt/options.substeps, options.quickStepIterations, statistics))
+            throw std::runtime_error("ODE physics step failed");
     }
 
-    sim_time += last_dt;
+    sim_time += dt;
 
     ball->tag = -1;
     for (int k=0;k<cfg->Robots_Count() * 2;k++)
     {
         robots[k]->step();
     }
-
-    sendVisionBuffer();
-    frame_num ++;
 }
 
 void SSLWorld::addRobotStatus(Robots_Status& robotsPacket, int robotID, bool infrared, KickStatus kickStatus) {

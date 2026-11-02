@@ -95,6 +95,8 @@ struct SimulationSettings {
     double BallMass() const { return value_BallMass; }
     double value_BallFriction{};
     double BallFriction() const { return value_BallFriction; }
+    double value_BallRollingDeceleration = 0.35;
+    double BallRollingDeceleration() const { return value_BallRollingDeceleration; }
     double value_BallSlip{};
     double BallSlip() const { return value_BallSlip; }
     double value_BallBounce{};
@@ -109,8 +111,8 @@ struct SimulationSettings {
     bool BallProjectAirborne() const { return value_BallProjectAirborne; }
     double value_BallModelTwoPhaseAccSlide{};
     double BallModelTwoPhaseAccSlide() const { return value_BallModelTwoPhaseAccSlide; }
-    double value_BallModelTwoPhaseAccRoll{};
-    double BallModelTwoPhaseAccRoll() const { return value_BallModelTwoPhaseAccRoll; }
+    // The advertised rolling phase must agree with the actual ground model.
+    double BallModelTwoPhaseAccRoll() const { return -BallRollingDeceleration(); }
     double value_BallModelTwoPhaseKSwitch{};
     double BallModelTwoPhaseKSwitch() const { return value_BallModelTwoPhaseKSwitch; }
     double value_BallModelChipFixedLossDampingXyFirstHop{};

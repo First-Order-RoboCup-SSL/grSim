@@ -36,7 +36,8 @@ void PCylinder::setMass(dReal mass)
 {
   m_mass = mass;
   dMass m;
-  dMassSetCylinderTotal (&m,m_mass,1,m_radius,m_length);
+  // ODE cylinders extend along local Z, including wheels rotated by the body.
+  dMassSetCylinderTotal (&m,m_mass,3,m_radius,m_length);
   dBodySetMass (body,&m);
 }
 

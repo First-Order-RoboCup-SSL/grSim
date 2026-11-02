@@ -43,10 +43,74 @@ static bool check(bool passed, const char* description)
     return passed;
 }
 
+
+static bool checkOdeWorkerPolicy()
+{
+    const bool hadOverride = qEnvironmentVariableIsSet("GRSIM_ODE_THREADS");
+    const QByteArray originalOverride = qgetenv("GRSIM_ODE_THREADS");
+    qunsetenv("GRSIM_ODE_THREADS");
+    QUdpSocket sink;
+    if (!sink.bind(QHostAddress(QHostAddress::LocalHost), 0)) return false;
+    QObject::connect(&sink, &QUdpSocket::readyRead, [&]() {
+        while (sink.hasPendingDatagrams()) {
+            QByteArray bytes(int(sink.pendingDatagramSize()), 0);
+            sink.readDatagram(bytes.data(), bytes.size());
+        }
+    });
+    ConfigWidget config(false);
+    config.v_Robots_Count->setInt(6);
+    config.v_CommandListenPort->setInt(0);
+    config.v_SimControlListenPort->setInt(0);
+    config.v_BlueControlListenPort->setInt(0);
+    config.v_YellowControlListenPort->setInt(0);
+    config.v_VisionMulticastAddr->setString("127.0.0.1");
+    config.v_VisionMulticastPort->setInt(sink.localPort());
+    auto settings = config.simulationSettings();
+    const int available = QThread::idealThreadCount();
+    const unsigned automatic = available >= 3 ? unsigned(qMin(3, available-1)) : 0;
+    bool passed = true;
+    {
+        SimulationController controller(settings);
+        auto verify = [&](unsigned expected, int robots, quint64 oldGeneration, const char* text) {
+            return check(waitFor([&]() {
+                const auto scene = controller.latest();
+                return scene && scene->generation > oldGeneration && scene->tick >= 2 &&
+                    scene->robots.size() == unsigned(2*robots) && scene->odeHelpers == expected &&
+                    std::isfinite(scene->ballPosition[0]);
+            }), text);
+        };
+        passed = verify(automatic, 6, 0, "large game starts with automatic island workers") && passed;
+        auto rebuild = [&](int robots, unsigned expected, const char* text) {
+            const quint64 generation = controller.latest()->generation;
+            settings.value_Robots_Count = robots;
+            controller.configure(settings, true);
+            return verify(expected, robots, generation, text);
+        };
+        passed = rebuild(1, 0, "small game releases automatic island workers") && passed;
+        qputenv("GRSIM_ODE_THREADS", "2");
+        passed = rebuild(1, 2, "explicit worker override applies to small games") && passed;
+        qputenv("GRSIM_ODE_THREADS", "0");
+        passed = rebuild(6, 0, "explicit zero keeps large games serial") && passed;
+        qputenv("GRSIM_ODE_THREADS", "invalid");
+        passed = rebuild(6, 0, "invalid override retains safe serial fallback") && passed;
+        qunsetenv("GRSIM_ODE_THREADS");
+        passed = rebuild(6, automatic, "removing override restores automatic workers") && passed;
+    }
+    if (hadOverride) qputenv("GRSIM_ODE_THREADS", originalOverride);
+    else qunsetenv("GRSIM_ODE_THREADS");
+    passed = check(!threadViolation.load(), "worker policy rebuilds and shutdown keep Qt ownership valid") && passed;
+    return passed;
+}
+
 int main(int argc, char** argv)
 {
     QApplication app(argc, argv);
     qInstallMessageHandler(captureQtMessages);
+    if (argc > 1 && QByteArray(argv[1]) == "--ode-worker-policy") {
+        const bool passed = checkOdeWorkerPolicy();
+        qInstallMessageHandler(nullptr);
+        return passed ? 0 : 1;
+    }
     bool passed = true;
     LagMonitor monitor;
     const double step = 1.0/60.0;
