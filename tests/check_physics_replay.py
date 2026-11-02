@@ -49,6 +49,12 @@ def difference(left, right):
 
 with tempfile.TemporaryDirectory(prefix="grsim-replay-") as directory:
     directory = Path(directory)
+    for settings in [directory / "missing.xml", directory]:
+        output = directory / "invalid-settings-output.json"
+        run(["--record", str(output), "--fixture", "spaced", "--ticks", "1",
+             "--settings", str(settings)], accepted=False)
+        assert not output.exists(), "invalid settings produced a recording"
+    print("PASS missing/non-file explicit settings are rejected before recording", flush=True)
     for fixture in ["spaced", "pushing"]:
         path = directory / (fixture + ".json")
         recorded = run(["--record", str(path), "--fixture", fixture, "--ticks", "180"])

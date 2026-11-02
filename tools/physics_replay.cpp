@@ -1,5 +1,6 @@
 #include <QApplication>
 #include <QFile>
+#include <QFileInfo>
 #include <QSaveFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -426,6 +427,11 @@ int main(int argc, char** argv)
                 throw std::runtime_error("Missing replay timeline");
             settings = loadSettings(recording["settings"].toObject());
         } else {
+            if (!settingsFile.isEmpty()) {
+                QFile input(settingsFile);
+                if (!QFileInfo(settingsFile).isFile() || !input.open(QIODevice::ReadOnly))
+                    throw std::runtime_error("Requested settings must be an existing readable regular file");
+            }
             ConfigWidget config(false, settingsFile);
             if (settingsFile.isEmpty()) {
                 config.v_BlueTeam->setString("Parsian"); config.v_YellowTeam->setString("Parsian");
