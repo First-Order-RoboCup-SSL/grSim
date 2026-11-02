@@ -30,6 +30,7 @@ COPY config /grsim/config
 COPY include /grsim/include
 COPY resources /grsim/resources
 COPY src /grsim/src
+COPY tools /grsim/tools
 COPY CMakeLists.txt README.md LICENSE.md /grsim/
 RUN mkdir build && \
     cd build && \
