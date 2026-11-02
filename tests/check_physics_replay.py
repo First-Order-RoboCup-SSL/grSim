@@ -1,4 +1,5 @@
 """Exercise actual recording/replay paths, including a live UDP capture."""
+import base64
 import copy
 import json
 import math
@@ -17,14 +18,14 @@ binary = str(Path(sys.argv[1]).resolve())
 env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
 
 
-def run(args, accepted=True):
+def run(args, accepted=True, step_seconds=1 / 60):
     result = subprocess.run([binary, *args], env=env, capture_output=True, text=True, timeout=30)
     if accepted:
         assert result.returncode == 0, result.stderr
         assert "ODE Message" not in result.stderr and "ODE Error" not in result.stderr, result.stderr
         value = json.loads(result.stdout)
         assert value["success"] and value["substeps"] == 5
-        assert abs(value["step_seconds"] - 1 / 60) < 1e-12
+        assert abs(value["step_seconds"] - step_seconds) < 1e-12
         assert value["max_shell_penetration_m"] <= 0.002, value["max_shell_penetration_m"]
         return value
     assert result.returncode != 0, "invalid recording was accepted"
@@ -55,6 +56,47 @@ with tempfile.TemporaryDirectory(prefix="grsim-replay-") as directory:
              "--settings", str(settings)], accepted=False)
         assert not output.exists(), "invalid settings produced a recording"
     print("PASS missing/non-file explicit settings are rejected before recording", flush=True)
+    settings = directory / "settings.xml"
+    for contents in ["", '<VarXML><Var name="Physics" type="list">',
+                     "<settings/>", '<VarXML xmlns="urn:unexpected"/>',
+                     "<VarXML/><VarXML/>"]:
+        settings.write_text(contents)
+        output = directory / "malformed-settings-output.json"
+        run(["--record", str(output), "--fixture", "spaced", "--ticks", "1",
+             "--settings", str(settings)], accepted=False)
+        assert not output.exists(), "malformed settings produced a recording"
+    print("PASS malformed/wrong-root explicit settings are rejected before recording", flush=True)
+
+    # A capture shorter than one valid physics tick can finish without stepping.
+    # Keep the zero-tick case deterministic as well as checking the real timer.
+    path = directory / "short.json"
+    settings.write_text(
+        '<?xml version="1.0"?>\n<!-- sparse replay settings -->\n'
+        '<VarXML><Var name="Geometry" type="list"><Var name="Game" type="list">'
+        '<Var name="Robots Count" type="int">6</Var></Var></Var>'
+        '<Var name="Physics" type="list"><Var name="World" type="list">'
+        '<Var name="ODE time step" type="double">0.1</Var></Var></Var></VarXML>')
+    captured = run(["--record", str(path), "--duration-ms", "50",
+                    "--settings", str(settings)], step_seconds=.1)
+    replayed = run(["--replay", str(path)], step_seconds=.1)
+    assert difference(captured, replayed) <= 1e-12
+    document = json.loads(path.read_text())
+    document["ticks"] = 0
+    document["events"] = []
+    path.write_text(json.dumps(document))
+    empty = run(["--replay", str(path)], step_seconds=.1)
+    assert empty["ticks"] == 0 and empty["contacts"] == 0
+    assert empty["checkpoints"] == [document["initial"]]
+    # A terminal tick-zero event must still be applied even without a step.
+    teleport = b"\x0a\x07\x0a\x05\x0d" + struct.pack("<f", 2)
+    document["events"] = [{"tick": 0, "kind": "simulator_control",
+                           "data": base64.b64encode(teleport).decode("ascii")}]
+    path.write_text(json.dumps(document))
+    commanded = run(["--replay", str(path)], step_seconds=.1)
+    assert commanded["ticks"] == 0 and commanded["contacts"] == 0
+    assert commanded["checkpoints"][0]["bodies"][0]["position"][0] == 2
+    assert commanded["checkpoints"][0]["simulation_time"] == document["initial"]["simulation_time"]
+    print("PASS short and zero-tick capture timelines replay exactly, including terminal commands", flush=True)
     for fixture in ["spaced", "pushing"]:
         path = directory / (fixture + ".json")
         recorded = run(["--record", str(path), "--fixture", fixture, "--ticks", "180"])
