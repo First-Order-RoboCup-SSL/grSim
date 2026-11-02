@@ -324,6 +324,13 @@ if(BUILD_TESTING)
         set_property(TARGET grSim_rendering_test APPEND_STRING PROPERTY
             LINK_FLAGS " -Wl,--wrap=glBegin")
     endif()
+    add_test(NAME render_capture_measurements_regression COMMAND grSim_rendering_test --profile-captures)
+    set_tests_properties(render_capture_measurements_regression PROPERTIES
+        TIMEOUT 15 LABELS "opengl" ENVIRONMENT "GRSIM_PROFILE_RENDERING=1")
+    if(UNIX AND NOT APPLE)
+        set_tests_properties(render_capture_measurements_regression PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=xcb;LIBGL_ALWAYS_SOFTWARE=1;GRSIM_PROFILE_RENDERING=1")
+    endif()
     add_test(NAME rendering_regression COMMAND grSim_rendering_test)
     set_tests_properties(rendering_regression PROPERTIES TIMEOUT 30 LABELS "opengl")
     if(UNIX AND NOT APPLE)

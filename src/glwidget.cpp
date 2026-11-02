@@ -31,6 +31,9 @@ Copyright (C) 2011, Parsian Robotic Center (eew.aut.ac.ir/~parsian/grsim)
 #include <QResizeEvent>
 #include <limits>
 #include <cmath>
+#include <QScopedValueRollback>
+#include <QWindow>
+#include <QOffscreenSurface>
 
 GLWidget::GLWidget(QWidget *parent, ConfigWidget* _cfg, SimulationController* controller)
     : QGLWidget(parent), cfg(_cfg), simulation(controller), renderer(this)
@@ -151,7 +154,7 @@ GLWidget::GLWidget(QWidget *parent, ConfigWidget* _cfg, SimulationController* co
 GLWidget::~GLWidget()
 {
     makeCurrent();
-    for (auto& query : gpuQueries) query.reset();
+    cleanupGpuTiming();
     delete m_fbo;
     renderer.graphics.clearTextures();
     doneCurrent();
@@ -404,20 +407,62 @@ void GLWidget::initializeGL()
         name.contains("swrast") || name.contains("swiftshader") ||
         name.contains("software") || name.contains("gdi generic") ||
         name.contains("microsoft basic render");
-    if (gpuTimingRequested) {
-        gpuTimingSupported = true;
-        for (auto& query : gpuQueries) {
-            query.reset(new QOpenGLTimerQuery());
-            if (!query->create()) { gpuTimingSupported = false; break; }
-        }
-        if (!gpuTimingSupported)
-            for (auto& query : gpuQueries) query.reset();
-    }
     if (snapshot) renderer.initialize(*snapshot);
 }
 void GLWidget::resizeGL(int width, int height) { glViewport(0, 0, width, height); }
 bool GLWidget::hasFramebufferObjects() const { return QGLFramebufferObject::hasOpenGLFramebufferObjects(); }
 bool GLWidget::hasFramebufferBlit() const { return QGLFramebufferObject::hasOpenGLFramebufferBlit(); }
+
+void GLWidget::initializeGpuTiming()
+{
+    if (!paintingWindow || !gpuTimingRequested || gpuTimingInitialized) return;
+    gpuContext = QOpenGLContext::currentContext();
+    if (!gpuContext) return;
+    gpuSurface = gpuContext->surface();
+    if (gpuSurface && gpuSurface->surfaceClass() == QSurface::Window)
+        gpuSurfaceOwner = static_cast<QWindow*>(gpuSurface);
+    else if (gpuSurface)
+        gpuSurfaceOwner = static_cast<QOffscreenSurface*>(gpuSurface);
+    gpuTimingInitialized = true;
+    gpuTimingSupported = true;
+    for (auto& query : gpuQueries) {
+        query.reset(new QOpenGLTimerQuery());
+        if (!query->create()) { gpuTimingSupported = false; break; }
+    }
+    if (!gpuTimingSupported)
+        for (auto& query : gpuQueries) query.reset();
+    gpuCleanupConnection = connect(gpuContext, &QOpenGLContext::aboutToBeDestroyed,
+                                  this, &GLWidget::cleanupGpuTiming, Qt::DirectConnection);
+}
+
+void GLWidget::cleanupGpuTiming()
+{
+    if (!gpuTimingInitialized) return;
+    disconnect(gpuCleanupConnection);
+    auto* previous = QOpenGLContext::currentContext();
+    auto* previousSurface = previous ? previous->surface() : nullptr;
+    auto* owner = gpuContext.data();
+    const bool switched = owner && previous != owner;
+    if (switched && gpuSurfaceOwner) owner->makeCurrent(gpuSurface);
+    // Never delete query IDs in another context: IDs are not shared. A lost
+    // context frees its native resources; with no current context deletion is
+    // harmless, whereas a different context could have unrelated matching IDs.
+    if (owner != QOpenGLContext::currentContext()) {
+        if (QOpenGLContext::currentContext()) QOpenGLContext::currentContext()->doneCurrent();
+    }
+    for (auto& query : gpuQueries) query.reset();
+    gpuPending.fill(false);
+    activeGpuQuery = -1;
+    gpuContext.clear();
+    gpuSurfaceOwner.clear();
+    gpuSurface = nullptr;
+    gpuTimingInitialized = gpuTimingSupported = false;
+    gpuTimings = TimingWindow();
+    if (switched) {
+        if (owner) owner->doneCurrent();
+        if (previous && previousSurface) previous->makeCurrent(previousSurface);
+    }
+}
 
 FrameTimings GLWidget::frameTimings() const
 {
@@ -437,6 +482,7 @@ void GLWidget::paintEvent(QPaintEvent* event)
 {
     QElapsedTimer elapsed;
     elapsed.start();
+    QScopedValueRollback<bool> painting(paintingWindow, true);
     QGLWidget::paintEvent(event); // Includes Qt's automatic buffer swap.
     if (!graphicsEnabled || !snapshot || !isValid()) return;
     paintTimings.add(elapsed.nsecsElapsed() / 1e6);
@@ -455,8 +501,9 @@ void GLWidget::paintGL()
     if (!snapshot) return;
     QElapsedTimer elapsed;
     elapsed.start();
+    initializeGpuTiming();
     activeGpuQuery = -1;
-    if (gpuTimingSupported) {
+    if (paintingWindow && gpuTimingSupported && gpuContext == QOpenGLContext::currentContext()) {
         for (unsigned i = 0; i < gpuQueries.size(); ++i) {
             if (gpuPending[i] && gpuQueries[i]->isResultAvailable()) {
                 gpuTimings.add(gpuQueries[i]->waitForResult() / 1e6);

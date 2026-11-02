@@ -23,6 +23,8 @@ Copyright (C) 2011, Parsian Robotic Center (eew.aut.ac.ir/~parsian/grsim)
 #include <QGLWidget>
 #include <QGLFramebufferObject>
 #include <QOpenGLTimerQuery>
+#include <QOpenGLContext>
+#include <QPointer>
 #include <memory>
 #include "timingstats.h"
 #include <QLabel>
@@ -145,6 +147,13 @@ private:
     qint64 previousFrame = -1;
     quint64 submittedFrames = 0;
     bool gpuTimingRequested = false, gpuTimingSupported = false;
+    bool gpuTimingInitialized = false, paintingWindow = false;
+    QPointer<QOpenGLContext> gpuContext;
+    QPointer<QObject> gpuSurfaceOwner;
+    QSurface* gpuSurface = nullptr;
+    QMetaObject::Connection gpuCleanupConnection;
+    void initializeGpuTiming();
+    void cleanupGpuTiming();
     std::array<std::unique_ptr<QOpenGLTimerQuery>, 4> gpuQueries;
     std::array<bool, 4> gpuPending{{false, false, false, false}};
     int activeGpuQuery = -1;
