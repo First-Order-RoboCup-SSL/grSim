@@ -22,6 +22,11 @@ Copyright (C) 2011, Parsian Robotic Center (eew.aut.ac.ir/~parsian/grsim)
 #define GL_SILENCE_DEPRECATION
 #include <QGLWidget>
 #include <QGLFramebufferObject>
+#include <QOpenGLTimerQuery>
+#include <QOpenGLContext>
+#include <QPointer>
+#include <memory>
+#include "timingstats.h"
 #include <QLabel>
 #include <QFrame>
 #include "simulation.h"
@@ -84,6 +89,7 @@ public:
     QMenu *cameraMenu;
     int Current_robot,Current_team;
     int lockedIndex;
+    FrameTimings frameTimings() const;
     bool ctrl,alt,kickingball,altTrigger;
     bool chiping;
     double kickpower, chipAngle;
@@ -107,11 +113,13 @@ public slots:
     void lockCameraToBall();
 signals:
     void frameRendered();
+    void frameSubmitted();
     void clicked();
     void selectedRobot();
     void closeSignal(bool);
     void robotTurnedOnOff(int,bool);
 protected:
+    void paintEvent(QPaintEvent* event) override;
     virtual bool hasFramebufferObjects() const;
     virtual bool hasFramebufferBlit() const;
     void resizeEvent(QResizeEvent* event) override;
@@ -134,6 +142,22 @@ private:
     SceneRenderer renderer;
     QString graphicsRenderer, graphicsVendor, graphicsVersion;
     bool softwareRendering = false;
+    TimingWindow intervalTimings, sceneTimings, labelTimings, paintTimings, gpuTimings;
+    QElapsedTimer frameClock;
+    qint64 previousFrame = -1;
+    quint64 submittedFrames = 0;
+    bool gpuTimingRequested = false, gpuTimingSupported = false;
+    bool gpuTimingInitialized = false, paintingWindow = false;
+    QPointer<QOpenGLContext> gpuContext;
+    QPointer<QObject> gpuSurfaceOwner;
+    QSurface* gpuSurface = nullptr;
+    QMetaObject::Connection gpuCleanupConnection;
+    void initializeGpuTiming();
+    void cleanupGpuTiming();
+    std::array<std::unique_ptr<QOpenGLTimerQuery>, 4> gpuQueries;
+    std::array<bool, 4> gpuPending{{false, false, false, false}};
+    int activeGpuQuery = -1;
+
     QWidget* lagWarning;
     bool showCursor = false;
     double cursorRadius = 0;

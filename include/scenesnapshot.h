@@ -7,6 +7,7 @@
 #include <vector>
 #include <QtGlobal>
 #include "simulationsettings.h"
+#include "timingstats.h"
 
 enum class PrimitiveKind { None, Sphere, Box, Cylinder, Ground };
 
@@ -42,6 +43,8 @@ struct SceneSnapshot {
     std::vector<RobotSnapshot> robots;
     std::array<double, 3> ballPosition{{0, 0, 0}};
     unsigned odeHelpers = 0;
+    TimingSummary stepTimings;
+    double snapshotMs = 0;
 };
 
 using SceneSnapshotPtr = std::shared_ptr<const SceneSnapshot>;

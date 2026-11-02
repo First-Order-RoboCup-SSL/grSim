@@ -41,14 +41,6 @@ Copyright (C) 2011, Parsian Robotic Center (eew.aut.ac.ir/~parsian/grsim)
 #include "config.h"
 #include "logger.h"
 
-int MainWindow::getRenderInterval()
-{
-    const double fps = configwidget->DesiredFPS();
-    return std::isfinite(fps) && fps > 0 ? qMax(1, qCeil(1000.0 / qMax(1.0, fps))) : 17;
-}
-
-
-
 void MainWindow::customFPS(int fps)
 {
     Q_UNUSED(fps);
@@ -181,7 +173,9 @@ MainWindow::MainWindow(QWidget *parent, ConfigWidget *config)
 
     renderTimer = new QTimer(this);
     renderTimer->setTimerType(Qt::PreciseTimer);
-    renderTimer->setInterval(getRenderInterval());
+    renderTimer->setSingleShot(true);
+    renderClock.start();
+    framePacer.reset(renderClock.nsecsElapsed(), configwidget->DesiredFPS());
 
     uiTimer = new QTimer(this);
     uiTimer->setInterval(33);
@@ -192,7 +186,7 @@ MainWindow::MainWindow(QWidget *parent, ConfigWidget *config)
     m_rateTimer.start();
 
     QObject::connect(renderTimer, SIGNAL(timeout()), this, SLOT(renderTick()));
-    QObject::connect(glwidget, SIGNAL(frameRendered()), this, SLOT(recordRenderedFrame()));
+    QObject::connect(glwidget, SIGNAL(frameSubmitted()), this, SLOT(recordRenderedFrame()));
     QObject::connect(uiTimer, SIGNAL(timeout()), this, SLOT(updateUI()));
     QObject::connect(takeSnapshotAct, SIGNAL(triggered(bool)), this, SLOT(takeSnapshot()));
     QObject::connect(takeSnapshotToClipboardAct, SIGNAL(triggered(bool)), this, SLOT(takeSnapshotToClipboard()));
@@ -215,7 +209,7 @@ MainWindow::MainWindow(QWidget *parent, ConfigWidget *config)
         if (configwidget->Robots_Count() != robotwidget->robotCombo->count()) changeRobotCount();
         else simulation->configure(configwidget->simulationSettings());
     });
-    renderTimer->start();
+    renderTimer->start(framePacer.delayMilliseconds(renderClock.nsecsElapsed()));
     uiTimer->start();
 
 
@@ -290,7 +284,8 @@ int MainWindow::robotIndex(int robot, int team)
 
 void MainWindow::changeTimer()
 {
-    renderTimer->setInterval(getRenderInterval());
+    framePacer.reset(renderClock.nsecsElapsed(), configwidget->DesiredFPS());
+    renderTimer->start(framePacer.delayMilliseconds(renderClock.nsecsElapsed()));
 }
 
 void MainWindow::changePhysicsTimer()
@@ -310,10 +305,15 @@ QString dRealToStr(dReal a)
 
 void MainWindow::renderTick()
 {
-    if (!glwidget->graphicsEnabled || !glwidget->isVisible()) return;
-    const auto snapshot = simulation->latest();
-    if (!snapshot || snapshot->pendingTime >= snapshot->settings.DeltaTime() * 2) return;
-    glwidget->update();
+    const qint64 now = renderClock.nsecsElapsed();
+    if (framePacer.due(now)) {
+        framePacer.advance(now);
+        // The mailbox contains completed immutable states. Physics backlog
+        // changes their age, not their safety to draw.
+        if (glwidget->graphicsEnabled && glwidget->isVisible() && simulation->latest())
+            glwidget->update();
+    }
+    renderTimer->start(framePacer.delayMilliseconds(renderClock.nsecsElapsed()));
 }
 
 void MainWindow::recordRenderedFrame()
@@ -376,6 +376,29 @@ void MainWindow::updateUI()
         m_renderFps = m_renderFramesThisSecond / elapsed;
         m_renderFramesThisSecond = 0;
         m_rateTimer.restart();
+        const auto timings = glwidget->frameTimings();
+        const auto gpu = timings.gpu.samples
+            ? tr("%1 ms").arg(timings.gpu.p95Ms, 0, 'f', 2)
+            : (timings.gpuRequested ? tr("unavailable or pending") : tr("profiling disabled"));
+        fpslabel->setToolTip(tr(
+            "Submitted frames; display presentation is controlled by the compositor.\n"
+            "Frame interval p50 / p95 / p99: %1 / %2 / %3 ms\n"
+            "Scene / labels / paint + swap p95: %4 / %5 / %6 ms\n"
+            "GPU drawing p95: %7\n"
+            "Simulation tick p95 / p99: %8 / %9 ms; snapshot: %10 ms\n"
+            "Physics backlog: %11 ms; ODE helpers: %12")
+            .arg(timings.interval.medianMs, 0, 'f', 2)
+            .arg(timings.interval.p95Ms, 0, 'f', 2)
+            .arg(timings.interval.p99Ms, 0, 'f', 2)
+            .arg(timings.scene.p95Ms, 0, 'f', 2)
+            .arg(timings.labels.p95Ms, 0, 'f', 2)
+            .arg(timings.paintAndSwap.p95Ms, 0, 'f', 2)
+            .arg(gpu)
+            .arg(snapshot->stepTimings.p95Ms, 0, 'f', 2)
+            .arg(snapshot->stepTimings.p99Ms, 0, 'f', 2)
+            .arg(snapshot->snapshotMs, 0, 'f', 2)
+            .arg(snapshot->pendingTime * 1000, 0, 'f', 2)
+            .arg(snapshot->odeHelpers));
     }
     fpslabel->setText(QString("Render: %1 fps | Sim: %2 Hz")
         .arg(QString::asprintf("%06.2f", m_renderFps))

@@ -202,6 +202,47 @@ static bool checkNoBlitUpdates(TestView& view)
     return passed;
 }
 
+static bool checkProfiledCaptures(MainWindow& window, GLWidget& view)
+{
+    window.resize(800, 600);
+    window.showNormal();
+    auto drawWindowFrame = [&]() {
+        const auto before = view.frameTimings().frames;
+        view.update();
+        QElapsedTimer wait;
+        wait.start();
+        while (view.frameTimings().frames == before && wait.elapsed() < 3000) {
+            QCoreApplication::processEvents();
+            QThread::msleep(1);
+        }
+        return view.frameTimings().frames > before;
+    };
+    bool passed = drawWindowFrame();
+    const auto firstFrames = view.frameTimings().frames;
+    for (int i = 0; i < 3; ++i) {
+        view.makeCurrent();
+        while (glGetError() != GL_NO_ERROR) {}
+        const auto captured = view.renderPixmap(320 + i * 10, 240, false).toImage();
+        passed = !captured.isNull() && passed;
+        // Qt's legacy capture may leave GL_FRONT errors in its temporary
+        // framebuffer context. Drain those before testing the normal window.
+        view.makeCurrent();
+        while (glGetError() != GL_NO_ERROR) {}
+        passed = drawWindowFrame() && passed;
+        view.makeCurrent();
+        const GLenum error = glGetError();
+        std::printf("%s profiled window resumes after temporary capture context (GL error 0x%x)\n",
+                    error == GL_NO_ERROR ? "PASS" : "FAIL", unsigned(error));
+        passed = error == GL_NO_ERROR && passed;
+    }
+    const auto timings = view.frameTimings();
+    const bool measured = timings.gpuRequested && timings.frames > firstFrames &&
+        (!timings.gpuSupported || timings.gpu.samples > 0);
+    std::printf("%s GPU timing survives screenshot context changes (supported=%d samples=%u)\n",
+                measured ? "PASS" : "FAIL", timings.gpuSupported, timings.gpu.samples);
+    return passed && measured;
+}
+
 int main(int argc, char** argv)
 {
     QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
@@ -225,6 +266,11 @@ int main(int argc, char** argv)
     view->makeCurrent();
     std::printf("OpenGL renderer: %s; display scale: %.1f\n", glGetString(GL_RENDERER), view->devicePixelRatioF());
     if (qgetenv("QT_SCALE_FACTOR") == "2" && view->devicePixelRatioF() < 1.9) return 2;
+    if (argc > 1 && QByteArray(argv[1]) == "--profile-captures") {
+        const bool passed = checkProfiledCaptures(*window, *view);
+        delete window;
+        return passed ? 0 : 1;
+    }
     bool passed = true;
     passed = checkTexturedCylinderDetail(*view) && passed;
     for (const QSize size : {QSize(512, 512), QSize(320, 240)}) {
