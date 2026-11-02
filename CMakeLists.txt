@@ -417,6 +417,12 @@ if(BUILD_TESTING)
     target_link_libraries(grSim_physics_experiments grSim_core)
     add_executable(grSim_ode_performance_experiments tests/ode_performance_experiments.cpp)
     target_link_libraries(grSim_ode_performance_experiments grSim_core)
+    if(TARGET ode_external)
+        target_include_directories(grSim_ode_performance_experiments PRIVATE
+            "${PROJECT_SOURCE_DIR}/cmake/ode" ${GRSIM_ODE_MATH_INCLUDE_DIR})
+        target_compile_definitions(grSim_ode_performance_experiments PRIVATE
+            GRSIM_ODE_USE_BLAS=$<BOOL:${GRSIM_ODE_MATH_AVAILABLE}>)
+    endif()
     find_program(GRSIM_PYTHON3_EXECUTABLE python3)
     if(GRSIM_PYTHON3_EXECUTABLE)
         add_test(NAME collision_filtering_trajectories

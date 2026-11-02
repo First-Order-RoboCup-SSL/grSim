@@ -19,6 +19,9 @@
 #include <stdexcept>
 #include "configwidget.h"
 #include "sslworld.h"
+#ifdef GRSIM_ODE_USE_BLAS
+#include "grsim_ode_math.h"
+#endif
 
 #ifndef GRSIM_ODE_MATH_BACKEND
 #define GRSIM_ODE_MATH_BACKEND "ODE"
@@ -428,7 +431,13 @@ QJsonObject run(SimulationSettings settings, const Options& options)
     // serializing results so only a small stop-command boundary can be sampled.
     if (perfControl.is_open()) perfControl << "disable\n" << std::flush;
     for (auto link : links) dJointDestroy(link);
-    QJsonObject output{{"collision_model","chassis-hull-2026"}, {"math_backend",GRSIM_ODE_MATH_BACKEND}, {"ode_version",QString::fromLatin1(dODE_VERSION)},
+#ifdef GRSIM_ODE_USE_BLAS
+    const char* triangularBackend = grsim_ode::triangularBackend();
+#else
+    const char* triangularBackend = "ODE";
+#endif
+    QJsonObject output{{"collision_model","chassis-hull-2026"}, {"math_backend",GRSIM_ODE_MATH_BACKEND},
+        {"triangular_backend",triangularBackend}, {"ode_version",QString::fromLatin1(dODE_VERSION)},
         {"configuration",QString::fromLatin1(dGetConfiguration())},
         {"scenario",options.scenario}, {"robots_per_team",robots}, {"masks",options.masks},
         {"default_filtering_enabled",defaultFiltering},

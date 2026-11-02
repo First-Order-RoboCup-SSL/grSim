@@ -203,12 +203,16 @@ against the intended workload.
 
 The bundled ODE build uses double-precision Accelerate on macOS and OpenBLAS
 when available on other platforms for triangular solves and dot products with
-at least 64 entries. Small kernels retain ODE's implementation. These synchronous
+at least 64 entries. On x86-64 CPUs with AVX2, contiguous triangular solves
+read ODE's matrix layout directly with vectorized kernels instead of packing
+through BLAS. CPU support is checked at runtime; other CPUs and strided solves
+retain the platform BLAS path. Small kernels retain ODE's implementation. These synchronous
 CPU calls keep the direct solver, collision shapes, materials and five substeps.
 OpenBLAS runs with one active math thread per calling ODE worker.
 
 On Ubuntu, install libopenblas-dev before configuring. CMake prints the selected
-backend; the performance harness reports it as math_backend. Set
+backend; the performance harness reports the BLAS provider as math_backend and
+large contiguous triangular dispatch as triangular_backend. Set
 GRSIM_ODE_OPTIMIZED_MATH=OFF when configuring to compare the scalar fallback.
 A compatible system ODE is used without this bundled patch.
 
