@@ -115,6 +115,20 @@ with tempfile.TemporaryDirectory(prefix="grsim-replay-") as directory:
                 break
         assert ready, "capture did not announce its loopback ports"
         port = int(re.search(r"blue=(\d+)", ready).group(1))
+        simulator_port = int(re.search(r"simulator=(\d+)", ready).group(1))
+        # Reject the whole batch before applying its ball or robot teleports,
+        # including explicitly present false-valued unsupported flags.
+        def message(field, payload):
+            assert len(payload) < 128
+            return bytes([(field << 3) | 2, len(payload)]) + payload
+        identity = b"\x08\x00\x10\x02"  # robot 0, BLUE
+        teleport_robot = message(1, identity) + b"\x15" + struct.pack("<f", 4)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as simulator:
+            for field in [7, 8]:  # teleport_safely, roll
+                for enabled in [False, True]:
+                    teleport_ball = b"\x0d" + struct.pack("<f", 2) + bytes([field << 3, int(enabled)])
+                    control = message(1, teleport_ball) + message(2, teleport_robot)
+                    simulator.sendto(message(1, control), ("127.0.0.1", simulator_port))
         # Minimal valid RobotControl/RobotCommand/MoveLocalVelocity wire packet.
         # Required float fields use protobuf fixed32 little-endian wire type 5.
         velocity = b"\x0d" + struct.pack("<f", .2) + b"\x15" + struct.pack("<f", 0) + b"\x1d" + struct.pack("<f", 0)
@@ -134,9 +148,11 @@ with tempfile.TemporaryDirectory(prefix="grsim-replay-") as directory:
         replayed = run(["--replay", str(path)])
         assert difference(recorded, replayed) <= 1e-12
         document = json.loads(path.read_text())
+        assert errors.count("Rejected capture command:") == 4, errors
+        assert not any(event["kind"] == "simulator_control" for event in document["events"])
         assert any(event["kind"] == "robot_control" for event in document["events"])
         assert any(event["kind"] == "expire" and event["team"] == 0 for event in document["events"])
-        print("PASS live UDP capture, command feedback and recorded watchdog expiry replay exactly", flush=True)
+        print("PASS rejected teleport batches leave state unchanged; live UDP feedback/expiry replay exactly", flush=True)
     finally:
         if process.poll() is None:
             process.kill()

@@ -300,6 +300,14 @@ QByteArray apply(SSLWorld& world, const QJsonObject& event)
     } else if (kind == "simulator_control") {
         const auto command = decode<SimulatorCommand>(event);
         if (command.has_config()) throw std::runtime_error("Replay does not support world configuration changes");
+        if (command.has_control() && command.control().has_teleport_ball()) {
+            const auto& ball = command.control().teleport_ball();
+            // The live handler can apply these teleports before reporting an
+            // unsupported field. Reject the entire capture/replay batch first,
+            // including explicitly present false flags and sibling robot moves.
+            if (ball.has_teleport_safely() || ball.has_roll())
+                throw std::runtime_error("Replay does not support safe or rolling ball teleports");
+        }
         SimulatorResponse response;
         world.processSimControl(command, response);
         if (response.errors_size()) throw std::runtime_error("Unsupported simulator command");
