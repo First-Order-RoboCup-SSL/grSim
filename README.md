@@ -144,3 +144,37 @@ Kazunori Kimura and Jeremy Feltracco and Kenta Sato and Atousa Ahsani},
   howpublished = {\url{https://github.com/RoboCup-SSL/grSim/}}
 }
 ```
+
+
+The `grSim_replay` developer executable records a fresh physics world's complete
+settings, initial body states, random seed and accepted protocol commands by
+simulation tick. Replay runs without rendering or wall-clock command scheduling:
+
+```sh
+bin/grSim_replay --record /tmp/pushing.json --fixture pushing --ticks 180
+bin/grSim_replay --replay /tmp/pushing.json --helpers 0 > /tmp/serial.json
+bin/grSim_replay --replay /tmp/pushing.json --helpers 3 > /tmp/workers.json
+```
+
+Both fixture modes use six robots per side. For a bounded loopback command
+capture, use `--record FILE --duration-ms 5000 --blue-port 10301 --yellow-port
+10302 --sim-port 10300`. The tool announces its ports, returns command feedback,
+and records command-watchdog expiry as explicit events. `--settings FILE` uses
+an existing grSim configuration when recording; replay reads its saved settings.
+The capture is a fresh headless physics session, with no vision publication,
+GUI edits, world configuration changes or arbitrary mid-match checkpoints.
+Replays retain the direct double-precision solver and five substeps. Compare
+numerical trajectories within a chosen tolerance across backends; identical
+bits on different CPUs are not promised.
+
+For measured ball trajectories, `tools/compare_ball_measurements.py` accepts
+the JSON output of `grSim_physics_experiments` and `--measured-csv FILE`.
+CSV columns are `t_s,x_m,y_m`, optionally `z_m`, with strictly increasing
+timestamps from one camera/track. It reports position errors without automatic
+fitting or extrapolation; `--time-offset-s` explicitly aligns the two clocks.
+The alternative `--reference-json tests/fixtures/er_force_2016_ball.json`
+compares sliding/rolling deceleration and transition speed against the published
+ER-Force 2016 fitted coefficients. These describe that team's field and ball,
+not a calibration of another setup. `--require-agreement` makes a reference
+mismatch return failure. Raw measurements and generated recordings should stay
+outside Git.

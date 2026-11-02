@@ -1,0 +1,15 @@
+{
+  "reference": "ER-Force Extended Team Description Paper, RoboCup 2016, section 5.2",
+  "source_url": "https://ssl.robocup.org/wp-content/uploads/2019/01/2016_ETDP_ER-Force.pdf",
+  "measurement_kind": "Author-reported fitted coefficients; raw shot samples and confidence intervals are not supplied here.",
+  "scope": "The authors' field and golf ball. This is not calibration of the user's robot or field.",
+  "sliding_acceleration_m_s2": -2.5,
+  "rolling_acceleration_m_s2": -0.3,
+  "switch_speed_ratio": 0.6,
+  "comparison_tolerances": {
+    "sliding_acceleration_m_s2": 0.3,
+    "rolling_acceleration_m_s2": 0.03,
+    "switch_speed_ratio": 0.05
+  },
+  "tolerance_note": "Diagnostic acceptance tolerances chosen for this comparison, not experimental uncertainty reported by the authors."
+}

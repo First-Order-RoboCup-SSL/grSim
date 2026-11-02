@@ -295,6 +295,27 @@ install(TARGETS ${app} BUNDLE DESTINATION . RUNTIME DESTINATION bin)
 target_link_libraries(${app} grSim_core)
 
 option(BUILD_TESTING "Build simulator regression tests." OFF)
+# Developer tool: capture fixed-step command timelines and replay without rendering.
+add_executable(grSim_replay tools/physics_replay.cpp)
+target_link_libraries(grSim_replay grSim_core)
+find_package(Git QUIET)
+set(GRSIM_REPLAY_REVISION "unknown")
+if(GIT_FOUND)
+    execute_process(COMMAND "${GIT_EXECUTABLE}" describe --always --dirty "--exclude=*"
+        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+        OUTPUT_VARIABLE GRSIM_REPLAY_GIT_REVISION OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(GRSIM_REPLAY_GIT_REVISION)
+        set(GRSIM_REPLAY_REVISION "${GRSIM_REPLAY_GIT_REVISION}")
+    endif()
+endif()
+target_compile_definitions(grSim_replay PRIVATE GRSIM_REPLAY_REVISION="${GRSIM_REPLAY_REVISION}")
+if(TARGET ode_external)
+    target_include_directories(grSim_replay PRIVATE
+        "${PROJECT_SOURCE_DIR}/cmake/ode" ${GRSIM_ODE_MATH_INCLUDE_DIR})
+    target_compile_definitions(grSim_replay PRIVATE
+        GRSIM_ODE_USE_BLAS=$<BOOL:${GRSIM_ODE_MATH_AVAILABLE}>)
+endif()
+
 if(BUILD_TESTING)
     enable_testing()
     # Exercise the actual application executable, including a relocated bundle.
@@ -428,6 +449,13 @@ if(BUILD_TESTING)
     endif()
     find_program(GRSIM_PYTHON3_EXECUTABLE python3)
     if(GRSIM_PYTHON3_EXECUTABLE)
+        add_test(NAME measurement_comparison_regression
+            COMMAND ${GRSIM_PYTHON3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/check_measurement_comparison.py)
+        set_tests_properties(measurement_comparison_regression PROPERTIES TIMEOUT 5)
+        add_test(NAME physics_replay_regression
+            COMMAND ${GRSIM_PYTHON3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/check_physics_replay.py
+                    $<TARGET_FILE:grSim_replay>)
+        set_tests_properties(physics_replay_regression PROPERTIES TIMEOUT 120)
         add_test(NAME collision_filtering_trajectories
             COMMAND ${GRSIM_PYTHON3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/check_collision_filtering.py
                     $<TARGET_FILE:grSim_ode_performance_experiments>)
