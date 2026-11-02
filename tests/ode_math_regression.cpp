@@ -134,7 +134,8 @@ int main()
         unsigned solves=0;
         double largest=0;
         for (unsigned n : {1U,2U,3U,4U,5U,7U,12U,15U,16U,31U,32U,33U,63U,64U,65U,
-                           66U,67U,95U,96U,97U,127U,128U,129U,191U,255U,256U,257U}) {
+                           66U,67U,95U,96U,97U,127U,128U,129U,191U,255U,256U,257U,
+                           511U,512U,513U,1023U,1024U,1025U}) {
             for (bool transposed : {false,true}) for (bool sparse : {false,true}) {
                 largest=std::max(largest,checkSolve<1>(n,transposed,sparse,n));
                 largest=std::max(largest,checkSolve<2>(n,transposed,sparse,n+1));
@@ -151,7 +152,8 @@ int main()
         require(openblas_get_num_threads()==1,"BLAS must not nest an ODE worker pool");
 #endif
         std::printf("PASS ODE CPU math: %u triangular cases, strided dots, 8 concurrent callers; "
-                    "max normalized reference difference %.3g\n",solves,largest);
+                    "max normalized reference difference %.3g; triangular backend %s\n",
+                    solves,largest,grsim_ode::triangularBackend());
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr,"FAIL ODE CPU math: %s\n",error.what());
