@@ -379,6 +379,7 @@ std::shared_ptr<SceneSnapshot> SSLWorld::snapshot(quint64 generation) const
     result->generation = generation;
     result->tick = frame_num;
     result->simulationTime = sim_time;
+    result->odeHelpers = p->threadCount();
     result->settings = *cfg;
     result->primitives = p->renderPrimitives();
     const auto* position = dBodyGetPosition(ball->body);

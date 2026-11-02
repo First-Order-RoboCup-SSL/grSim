@@ -79,7 +79,7 @@ Collision tests check side and rear ball contact, dribbler access, roller
 retention while stationary and moving, and flat/chip kicks for separate team
 sizes and rotated robots, including ball acquisition with recessed dribblers.
 Robot-pair regressions also cover side/rear pushing, rotated and different-sized
-robots, with serial ODE and optional helpers. Robot contact spheres match the
+robots, with serial and parallel ODE stepping. Robot contact spheres match the
 outer shell radius and attach directly to the chassis, avoiding an extra fixed
 body while preserving the previous combined mass and inertia. The kinematic
 ball/hull fixtures isolate wheel-ground and rolling constraints; dynamic physics
@@ -95,8 +95,8 @@ Kernel regressions compare native CPU math and scalar fallback against the pinne
 ODE implementation, including equation residuals, strides and concurrent callers.
 The ODE regressions cover ball resistance, cylinder inertia, settings migration,
 collision-filtered contacts/trajectories, helper stepping and concurrent worlds.
-Helpers are disabled by default; see the
-[setup and limitations](INSTALL.md#experimental-ode-helper-threads).
+The app selects CPU helpers automatically for large games on multicore machines;
+see the [worker policy and overrides](INSTALL.md#ode-cpu-workers).
 Ball physics defaults and migration are described in the
 [installation guide](INSTALL.md#ball-physics-defaults).
 

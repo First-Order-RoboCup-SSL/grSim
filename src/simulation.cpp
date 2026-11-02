@@ -137,7 +137,15 @@ void SimulationWorker::rebuildWorld()
     RobotsFormation form(FORMATION_INSIDE_1, &settings);
     world = new SSLWorld(this, &settings, &form, &form);
     const QByteArray requestedThreads = qgetenv("GRSIM_ODE_THREADS");
-    if (!requestedThreads.isEmpty()) {
+    if (requestedThreads.isEmpty()) {
+        const int available = QThread::idealThreadCount();
+        // Large games can contain several independent contact islands. Keep
+        // one logical CPU available for the GUI and bound pool overhead.
+        const int helpers = settings.Robots_Count() >= 6 && available >= 3
+            ? qMin(3, available - 1) : 0;
+        if (helpers && !world->p->setThreadCount(unsigned(helpers)))
+            qWarning("Could not start automatic ODE helpers; using serial ODE stepping");
+    } else {
         bool valid = false;
         const int helpers = requestedThreads.toInt(&valid);
         if (!valid || helpers < 0 || helpers > 16 || !world->p->setThreadCount(unsigned(helpers)))
