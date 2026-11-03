@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<!-- Utama field, physical logs from 27-28 October 2026 (Utama-Core v2.5.0).
+     Calibrates ground rolling and body-velocity response of the two measured robots.
+     Ball rolling was checked on held-out logs; robot response on held-out moves. -->
+<VarXML>
+  <Var name="Geometry" type="list">
+    <Var name="Game" type="list">
+      <Var name="Robots Count" type="int">6</Var>
+    </Var>
+    <Var name="Yellow Team" type="stringenum">Utama-Radio-0</Var>
+    <Var name="Blue Team" type="stringenum">Utama-Radio-1</Var>
+  </Var>
+  <Var name="Physics" type="list">
+    <Var name="Ball" type="list">
+      <Var name="Ball rolling deceleration (m/s^2)" type="double">0.20</Var>
+    </Var>
+  </Var>
+</VarXML>

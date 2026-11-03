@@ -17,9 +17,11 @@ Copyright (C) 2011, Parsian Robotic Center (eew.aut.ac.ir/~parsian/grsim)
 */
 #include <QtWidgets/QApplication>
 #include "mainwindow.h"
+#include <cstdio>
+#include <stdexcept>
 
 #ifdef GRSIM_BUILD_SMOKE_TEST
-int runApplicationSmokeTest(QApplication& app);
+int runApplicationSmokeTest(QApplication& app, const QString& settingsPath);
 #endif
 
 int main(int argc, char *argv[])
@@ -37,16 +39,28 @@ int main(int argc, char *argv[])
     QCommandLineOption headlessOption(QStringList() << "H" << "headless", 
                                       QCoreApplication::translate("main", "Run without a UI"));
     parser.addOption(headlessOption);
+    QCommandLineOption settingsOption("settings",
+        "Read an XML configuration for this run without changing saved settings.", "file");
+    parser.addOption(settingsOption);
 #ifdef GRSIM_BUILD_SMOKE_TEST
     QCommandLineOption smokeOption("smoke-test", "Check application resources, rendering and UDP, then exit.");
     parser.addOption(smokeOption);
 #endif
     parser.process(a);
+    ConfigWidget* config = nullptr;
+    try {
+        if (parser.isSet(settingsOption) && parser.value(settingsOption).isEmpty())
+            throw std::runtime_error("Expected a nonempty settings filename");
 #ifdef GRSIM_BUILD_SMOKE_TEST
-    if (parser.isSet(smokeOption)) return runApplicationSmokeTest(a);
+        if (parser.isSet(smokeOption)) return runApplicationSmokeTest(a, parser.value(settingsOption));
 #endif
+        if (parser.isSet(settingsOption)) config = new ConfigWidget(false, parser.value(settingsOption));
+    } catch (const std::exception& error) {
+        std::fprintf(stderr, "%s\n", error.what());
+        return 2;
+    }
 
-    MainWindow w;
+    MainWindow w(nullptr, config);
     if (parser.isSet(headlessOption)) {
         // enable headless mode
         w.hide();

@@ -189,3 +189,31 @@ ER-Force 2016 fitted coefficients. These describe that team's field and ball,
 not a calibration of another setup. `--require-agreement` makes a reference
 mismatch return failure. Raw measurements and generated recordings should stay
 outside Git.
+
+### Utama physical-field calibration
+
+`config/Utama-Field-20261028.xml` selects the two measured robot models (yellow:
+radio 0, blue: radio 1), six robots per side, and 0.20 m/s² ball rolling
+deceleration. Start with `grSim --settings config/Utama-Field-20261028.xml`.
+The file applies to this run; saved personal settings are unchanged. In a Mac
+bundle it is under `grSim.app/Contents/Resources/config/`.
+
+The profiles use physical logs from 27–28 October in
+[Utama-Core v2.5.0](https://github.com/First-Order-RoboCup-SSL/Utama-Core/releases/tag/v2.5.0).
+SIM logs, the simulated tournament, uncertain 21 October logs, setup-only
+segments and invalid starting states were excluded from fitting. Robot gains
+were checked on held-out command steps, and ball rolling on held-out source logs.
+Geometry and masses remain assumptions from Parsian; these logs do not measure
+them. Response is validated for the observed drives (up to 1 m/s) and turns
+(1–4 rad/s), not all possible commands.
+
+Local/global body-velocity commands use separate forward/left gains and angular
+gain `AngularVelocityScale + AngularVelocityScaleSlope * abs(requested_turn)`.
+Raw wheel-speed commands keep their existing meaning. General models retain unit
+gains and zero slope. Camera/radio delay, vision noise, kicker charge and dribbler
+loss are separate effects; this profile does not fit those into ODE or duplicate
+an external hardware-noise layer. Use one actuator-response model in the stack.
+
+For physics comparisons, `grSim_replay --replay FILE --checkpoint-every 1` saves
+every simulation tick. The default interval remains 30 ticks; diagnostics do not
+change the fixed timestep or five ODE substeps.

@@ -17,7 +17,7 @@
 
 // Run through the real executable and its installed resources; never read or
 // write personal settings. CTest and the relocated macOS artifact use this path.
-int runApplicationSmokeTest(QApplication& app)
+int runApplicationSmokeTest(QApplication& app, const QString& settingsPath)
 {
     QUdpSocket vision, feedback, reserve;
     if (!vision.bind(QHostAddress(QHostAddress::LocalHost), 0) ||
@@ -25,10 +25,11 @@ int runApplicationSmokeTest(QApplication& app)
         !reserve.bind(QHostAddress(QHostAddress::LocalHost), 0)) return 2;
     const quint16 controlPort = reserve.localPort();
     reserve.close();
-    auto* config = new ConfigWidget(false);
+    auto* config = new ConfigWidget(false, settingsPath);
     config->v_BlueTeam->setString("Parsian");
     config->v_YellowTeam->setString("Parsian");
     config->loadRobotsSettings();
+    std::printf("Settings: rolling_deceleration=%.2f\n", config->BallRollingDeceleration());
     const auto model = config->simulationSettings().blueSettings;
     const bool resources = std::abs(model.RobotHeight - 0.147) < 1e-9 &&
         std::abs(model.WheelRadius - 0.027) < 1e-9;

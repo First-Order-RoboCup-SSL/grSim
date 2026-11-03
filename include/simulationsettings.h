@@ -41,6 +41,11 @@ public:
     double AccBrakeAngularMax;
     double VelAbsoluteMax;
     double VelAngularMax;
+    // Measured body-velocity response to local/global velocity commands.
+    double ForwardVelocityScale = 1;
+    double LeftVelocityScale = 1;
+    double AngularVelocityScale = 1;
+    double AngularVelocityScaleSlope = 0; // gain per absolute commanded rad/s
     bool operator==(const RobotSettings& other) const {
         for (auto member : members())
             if (this->*member != other.*member) return false;
@@ -53,8 +58,8 @@ public:
     }
 
 private:
-    static const std::array<double RobotSettings::*, 32>& members() {
-        static const std::array<double RobotSettings::*, 32> values{{
+    static const std::array<double RobotSettings::*, 36>& members() {
+        static const std::array<double RobotSettings::*, 36> values{{
             &RobotSettings::RobotCenterFromKicker, &RobotSettings::RobotRadius,
             &RobotSettings::RobotHeight, &RobotSettings::BottomHeight,
             &RobotSettings::KickerZ, &RobotSettings::KickerThickness,
@@ -70,7 +75,9 @@ private:
             &RobotSettings::MaxChipKickSpeed, &RobotSettings::AccSpeedupAbsoluteMax,
             &RobotSettings::AccSpeedupAngularMax, &RobotSettings::AccBrakeAbsoluteMax,
             &RobotSettings::AccBrakeAngularMax, &RobotSettings::VelAbsoluteMax,
-            &RobotSettings::VelAngularMax
+            &RobotSettings::VelAngularMax, &RobotSettings::ForwardVelocityScale,
+            &RobotSettings::LeftVelocityScale, &RobotSettings::AngularVelocityScale,
+            &RobotSettings::AngularVelocityScaleSlope
         }};
         return values;
     }

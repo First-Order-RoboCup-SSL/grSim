@@ -417,6 +417,12 @@ void Robot::setSpeed(int i,dReal s)
 
 void Robot::setSpeed(dReal vx, dReal vy, dReal vw)
 {
+    vx *= settings.ForwardVelocityScale;
+    vy *= settings.LeftVelocityScale;
+    const double angularScale = settings.AngularVelocityScaleSlope == 0
+        ? settings.AngularVelocityScale
+        : settings.AngularVelocityScale + settings.AngularVelocityScaleSlope * std::abs(vw);
+    vw *= angularScale;
     dReal _DEG2RAD = M_PI / 180.0;
 
     dReal v = sqrt(vx * vx + vy * vy);
