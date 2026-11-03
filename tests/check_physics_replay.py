@@ -196,15 +196,12 @@ with tempfile.TemporaryDirectory(prefix="grsim-replay-") as directory:
             changed.write_text(json.dumps(legacy))
             assert difference(serial, run(["--replay", str(changed)])) <= 1e-12
             print("PASS omitted response fields retain exact unit-response physics", flush=True)
-            fixed = copy.deepcopy(document)
+            fixed = copy.deepcopy(legacy)
             fixed["integration_policy"] = "fixed-5-v1"
             changed.write_text(json.dumps(fixed))
             fixed_result = run(["--replay", str(changed)])
             del fixed["integration_policy"]
             fixed["format"] = "grsim-physics-replay-v1"
-            for model in ["robotSettings", "blueSettings", "yellowSettings"]:
-                for key in ["ForwardVelocityScale", "LeftVelocityScale", "AngularVelocityScale", "AngularVelocityScaleSlope"]:
-                    del fixed["settings"][model][key]
             changed.write_text(json.dumps(fixed))
             historical = run(["--replay", str(changed)])
             assert historical["integration_policy"] == "fixed-5-v1"
