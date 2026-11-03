@@ -20,6 +20,11 @@ Copyright (C) 2011, Parsian Robotic Center (eew.aut.ac.ir/~parsian/grsim)
 
 #include <memory>
 #include <QTimer>
+#include <QFile>
+#include <QFileInfo>
+#include <QXmlStreamReader>
+#include <stdexcept>
+#include <cmath>
 
 #define ADD_ENUM(type,name,Defaultvalue,namestring) \
     v_##name = std::shared_ptr<VarTypes::Var##type>(new VarTypes::Var##type(namestring,Defaultvalue)); \
@@ -49,9 +54,26 @@ static QString robotConfigDirectory()
     return executable.absoluteFilePath("../config");
 }
 
+// Explicit settings are configuration input, not a request to silently use
+// defaults. The implicit personal settings path keeps its historical fallback.
+static void validateSettingsFile(const QString& path)
+{
+    QFile input(path);
+    if (!QFileInfo(path).isFile() || !input.open(QIODevice::ReadOnly))
+        throw std::runtime_error("Requested settings must be an existing readable regular file");
+    QXmlStreamReader xml(&input);
+    if (!xml.readNextStartElement() || xml.qualifiedName() != QLatin1String("VarXML") ||
+        !xml.namespaceUri().isEmpty())
+        throw std::runtime_error("Requested settings must have a VarXML root");
+    while (!xml.atEnd()) xml.readNext();
+    if (xml.hasError())
+        throw std::runtime_error("Requested settings contain invalid XML");
+}
+
 ConfigWidget::ConfigWidget(bool persist, const QString& settingsPath)
     : persistSettings(persist), settingsFile(settingsPath.isEmpty()
           ? QDir::homePath() + QString("/.grsim.xml") : settingsPath) {
+  if (!settingsPath.isEmpty()) validateSettingsFile(settingsPath);
   tmodel=new VarTreeModel();
   this->setModel(tmodel);  
   geo_vars = std::make_shared<VarList>("Geometry");
@@ -332,6 +354,17 @@ void ConfigWidget::loadRobotSettings(QString team)
     robotSettings.AccBrakeAngularMax = robot_settings->value("Physics/AccBrakeAngularMax", 50).toDouble();
     robotSettings.VelAbsoluteMax = robot_settings->value("Physics/VelAbsoluteMax", 5).toDouble();
     robotSettings.VelAngularMax = robot_settings->value("Physics/VelAngularMax", 20).toDouble();
+    auto velocityScale = [&](const char* name) {
+        const double value = robot_settings->value(QString("Actuation/") + name, 1.0).toDouble();
+        if (std::isfinite(value) && value > 0) return value;
+        qWarning("Invalid %s in robot model; using unit response", name);
+        return 1.0;
+    };
+    robotSettings.ForwardVelocityScale = velocityScale("ForwardVelocityScale");
+    robotSettings.LeftVelocityScale = velocityScale("LeftVelocityScale");
+    robotSettings.AngularVelocityScale = velocityScale("AngularVelocityScale");
+    const double slope = robot_settings->value("Actuation/AngularVelocityScaleSlope", 0.0).toDouble();
+    robotSettings.AngularVelocityScaleSlope = std::isfinite(slope) && slope >= 0 ? slope : 0;
 }
 
 SimulationSettings ConfigWidget::simulationSettings()

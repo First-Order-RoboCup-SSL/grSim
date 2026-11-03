@@ -281,7 +281,7 @@ foreach(dependency vartypes_external protobuf_external ode_external)
 endforeach()
 target_sources(${app} PRIVATE src/main.cpp)
 if(APPLE AND GRSIM_MACOSX_BUNDLE)
-    file(GLOB CONFIG_FILES "config/*.ini")
+    file(GLOB CONFIG_FILES "config/*.ini" "config/*.xml")
     set_source_files_properties(${CONFIG_FILES} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/config")
     set(app_icon "${PROJECT_SOURCE_DIR}/resources/icons/grsim.icns")
     set_source_files_properties("${app_icon}" PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
@@ -324,9 +324,13 @@ if(BUILD_TESTING)
     target_sources(${app} PRIVATE tests/application_smoke.cpp)
     target_compile_definitions(${app} PRIVATE GRSIM_BUILD_SMOKE_TEST)
     add_test(NAME application_smoke COMMAND $<TARGET_FILE:${app}> --smoke-test)
+    add_test(NAME application_smoke_field_profile COMMAND $<TARGET_FILE:${app}>
+        --smoke-test --settings "${PROJECT_SOURCE_DIR}/config/Utama-Field-20261028.xml")
+    set_tests_properties(application_smoke_field_profile PROPERTIES
+        TIMEOUT 20 LABELS "opengl")
     set_tests_properties(application_smoke PROPERTIES TIMEOUT 20 LABELS "opengl")
     if(UNIX AND NOT APPLE)
-        set_tests_properties(application_smoke PROPERTIES
+        set_tests_properties(application_smoke application_smoke_field_profile PROPERTIES
             ENVIRONMENT "QT_QPA_PLATFORM=xcb;LIBGL_ALWAYS_SOFTWARE=1")
     endif()
     add_executable(grSim_timing_test tests/timing_regression.cpp)

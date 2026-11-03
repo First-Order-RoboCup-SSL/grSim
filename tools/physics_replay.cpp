@@ -1,8 +1,6 @@
 #include <QApplication>
 #include <QFile>
-#include <QFileInfo>
 #include <QSaveFile>
-#include <QXmlStreamReader>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -65,6 +63,11 @@
     X(AccBrakeAngularMax) \
     X(VelAbsoluteMax) \
     X(VelAngularMax)
+#define ROBOT_RESPONSE_FIELDS(X) \
+    X(ForwardVelocityScale) \
+    X(LeftVelocityScale) \
+    X(AngularVelocityScale) \
+    X(AngularVelocityScaleSlope)
 #define SIM_INT_FIELDS(X) \
     X(Robots_Count) \
     X(sendGeometryEvery) \
@@ -153,7 +156,7 @@ QJsonObject saveRobot(const RobotSettings& settings)
 {
     QJsonObject result;
 #define SAVE(name) result[#name] = settings.name;
-    ROBOT_FIELDS(SAVE)
+    ROBOT_FIELDS(SAVE) ROBOT_RESPONSE_FIELDS(SAVE)
 #undef SAVE
     return result;
 }
@@ -163,11 +166,21 @@ RobotSettings loadRobot(const QJsonObject& object)
 #define LOAD(name) result.name = number(object, #name);
     ROBOT_FIELDS(LOAD)
 #undef LOAD
+    // Older v1 recordings have unit response, before these optional fields
+    // existed. Preserve their exact command/physics behaviour.
+#define LOAD(name) if (object.contains(#name)) result.name = number(object, #name);
+    ROBOT_RESPONSE_FIELDS(LOAD)
+#undef LOAD
+    if (result.ForwardVelocityScale <= 0 || result.LeftVelocityScale <= 0 ||
+        result.AngularVelocityScale <= 0 || result.AngularVelocityScaleSlope < 0)
+        throw std::runtime_error("Invalid robot velocity response");
     if (result.BodyMass <= 0 || result.WheelMass <= 0 || result.KickerMass <= 0 ||
         result.RobotRadius <= 0 || result.RobotHeight <= 0 ||
         result.WheelRadius <= 0 || result.WheelThickness <= 0)
         throw std::runtime_error("Invalid robot dimensions or mass");
-    if (saveRobot(result).size() != object.size()) throw std::runtime_error("Unknown robot setting");
+    const auto known = saveRobot(result);
+    for (auto field = object.begin(); field != object.end(); ++field)
+        if (!known.contains(field.key())) throw std::runtime_error("Unknown robot setting");
     return result;
 }
 QJsonObject saveSettings(const SimulationSettings& settings)
@@ -383,7 +396,7 @@ int main(int argc, char** argv)
     if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) qputenv("QT_QPA_PLATFORM", "offscreen");
     QApplication app(argc, argv);
     QString recordFile, replayFile, settingsFile, fixture;
-    unsigned helpers = 0, seed = 166, ticks = 180, durationMs = 0;
+    unsigned helpers = 0, seed = 166, ticks = 180, durationMs = 0, checkpointEvery = 30;
     unsigned ports[3] = {0, 0, 0};
     try {
         for (int i = 1; i < argc; ++i) {
@@ -402,6 +415,7 @@ int main(int argc, char** argv)
                 else if (option == "--seed") seed = number;
                 else if (option == "--ticks" && number > 0 && number <= 1000000) ticks = number;
                 else if (option == "--duration-ms" && number >= 50 && number <= 120000) durationMs = number;
+                else if (option == "--checkpoint-every" && number > 0 && number <= 1000000) checkpointEvery = number;
                 else if (option == "--blue-port" && number <= 65535) ports[0] = number;
                 else if (option == "--yellow-port" && number <= 65535) ports[1] = number;
                 else if (option == "--sim-port" && number <= 65535) ports[2] = number;
@@ -428,20 +442,6 @@ int main(int argc, char** argv)
                 throw std::runtime_error("Missing replay timeline");
             settings = loadSettings(recording["settings"].toObject());
         } else {
-            if (!settingsFile.isEmpty()) {
-                QFile input(settingsFile);
-                if (!QFileInfo(settingsFile).isFile() || !input.open(QIODevice::ReadOnly))
-                    throw std::runtime_error("Requested settings must be an existing readable regular file");
-                // VarXML silently keeps defaults when parsing fails. Validate
-                // explicit input first so a recording cannot use another setup.
-                QXmlStreamReader xml(&input);
-                if (!xml.readNextStartElement() || xml.qualifiedName() != QLatin1String("VarXML") ||
-                    !xml.namespaceUri().isEmpty())
-                    throw std::runtime_error("Requested settings must have a VarXML root");
-                while (!xml.atEnd()) xml.readNext();
-                if (xml.hasError())
-                    throw std::runtime_error("Requested settings contain invalid XML");
-            }
             ConfigWidget config(false, settingsFile);
             if (settingsFile.isEmpty()) {
                 config.v_BlueTeam->setString("Parsian"); config.v_YellowTeam->setString("Parsian");
@@ -491,7 +491,7 @@ int main(int argc, char** argv)
             auto step = [&]() {
                 world.stepPhysics(settings.DeltaTime(), PhysicsStepOptions(), &statistics);
                 ++tick;
-                if (tick % 30 == 0) checkpoints.append(state(world, tick));
+                if (tick % checkpointEvery == 0) checkpoints.append(state(world, tick));
             };
             auto accept = [&](const QJsonObject& event) {
                 const auto response = apply(world, event);
@@ -514,6 +514,8 @@ int main(int argc, char** argv)
                     }
                 accept(commandEvent(tick, "simulator_control", placement));
                 while (tick < ticks) {
+                    // Fixture inputs have their own fixed schedule. Changing
+                    // observation density must never alter the accepted commands.
                     if (tick % 30 == 0) {
                         for (int team = 0; team < 2; ++team) {
                             RobotControl command;
@@ -601,7 +603,7 @@ int main(int argc, char** argv)
                 while (index < unsigned(events.size()))
                     apply(world, events[int(index++)].toObject());
             }
-            if (tick % 30 == 0) checkpoints.removeLast();
+            if (tick % checkpointEvery == 0) checkpoints.removeLast();
             checkpoints.append(state(world, tick));
             recording["ticks"] = int(tick);
             recording["events"] = events;
