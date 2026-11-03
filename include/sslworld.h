@@ -51,10 +51,11 @@ class RobotsFormation;
 // Alternate values support controlled offline experiments without changing
 // networking or personal settings. Legacy friction is only a comparison mode.
 struct PhysicsStepOptions {
-    unsigned substeps = 5;
+    unsigned substeps = 5; // Minimum integration steps per fixed tick.
     unsigned quickStepIterations = 0;
     bool legacyBallFriction = false;
     bool finiteWheelRotation = false;
+    bool refineShellImpacts = true; // Nearby shells use at least six steps.
 };
 
 class SendingPacket {
@@ -82,6 +83,7 @@ private:
     static void processMoveCommand(RobotControlResponse &robotControlResponse, const RobotMoveCommand &robotCommand,
                             Robot *robot) ;
     void releaseBallHolds() const;
+    bool shellsMayMeet(dReal frameStep) const;
     void processTeleportBall(SimulatorResponse &simulatorResponse, const TeleportBall &teleBall) const;
     static void processTeleportRobot(const TeleportRobot &teleBot, Robot *robot);
 public:

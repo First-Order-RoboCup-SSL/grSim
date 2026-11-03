@@ -129,6 +129,22 @@ with tempfile.TemporaryDirectory(prefix="grsim-replay-") as directory:
         assert tuple(field_settings[name][key] for key in
                      ["ForwardVelocityScale", "LeftVelocityScale", "AngularVelocityScale", "AngularVelocityScaleSlope"]) == expected
     print("PASS physical robot profiles and measured ball settings load and record explicitly", flush=True)
+    # Fast initial shell contact must meet the same overlap bound while turning.
+    turning_path = directory / "pushing-turning.json"
+    turning = run(["--record", str(turning_path), "--fixture", "pushing-turning",
+                   "--ticks", "900", "--settings", str(profile_path)])
+    turning_workers = run(["--replay", str(turning_path), "--helpers", "3"])
+    # Keep the existing 3s cross-worker bound. Long forced-contact paths amplify
+    # roundoff even with the historical fixed-five integrator; full serial runs
+    # must instead repeat exactly, while both modes retain the 2mm contact bound.
+    turning_repeated = run(["--replay", str(turning_path), "--helpers", "0"])
+    assert difference(turning, turning_repeated) <= 1e-12
+    short_serial = dict(turning, checkpoints=[p for p in turning["checkpoints"] if p["tick"] <= 180])
+    short_workers = dict(turning_workers, checkpoints=[p for p in turning_workers["checkpoints"] if p["tick"] <= 180])
+    assert difference(short_serial, short_workers) <= 1e-6
+    assert turning["integration_policy"] == "near-shell-6-v1"
+    assert turning["integration_steps"] > turning["ticks"] * turning["substeps"]
+    print("PASS 6v6 pushing/turning stays within 2mm with serial and threaded ODE", flush=True)
     for fixture in ["spaced", "pushing"]:
         path = directory / (fixture + ".json")
         recorded = run(["--record", str(path), "--fixture", fixture, "--ticks", "180"])
@@ -179,8 +195,29 @@ with tempfile.TemporaryDirectory(prefix="grsim-replay-") as directory:
                     del legacy["settings"][model][key]
             changed.write_text(json.dumps(legacy))
             assert difference(serial, run(["--replay", str(changed)])) <= 1e-12
-            print("PASS legacy v1 recordings retain exact unit-response physics", flush=True)
+            print("PASS omitted response fields retain exact unit-response physics", flush=True)
+            fixed = copy.deepcopy(document)
+            fixed["integration_policy"] = "fixed-5-v1"
+            changed.write_text(json.dumps(fixed))
+            fixed_result = run(["--replay", str(changed)])
+            del fixed["integration_policy"]
+            fixed["format"] = "grsim-physics-replay-v1"
+            for model in ["robotSettings", "blueSettings", "yellowSettings"]:
+                for key in ["ForwardVelocityScale", "LeftVelocityScale", "AngularVelocityScale", "AngularVelocityScaleSlope"]:
+                    del fixed["settings"][model][key]
+            changed.write_text(json.dumps(fixed))
+            historical = run(["--replay", str(changed)])
+            assert historical["integration_policy"] == "fixed-5-v1"
+            assert historical["integration_steps"] == historical["ticks"] * 5
+            assert difference(fixed_result, historical) <= 1e-12
+            print("PASS recordings without integration metadata retain fixed-five physics", flush=True)
             variants = []
+            unknown_policy = copy.deepcopy(document); unknown_policy["integration_policy"] = "unknown"
+            variants.append(unknown_policy)
+            missing_policy = copy.deepcopy(document); del missing_policy["integration_policy"]
+            variants.append(missing_policy)
+            wrong_legacy_policy = copy.deepcopy(document); wrong_legacy_policy["format"] = "grsim-physics-replay-v1"
+            variants.append(wrong_legacy_policy)
             for key, value in [("ForwardVelocityScale", 0), ("LeftVelocityScale", -1),
                                ("AngularVelocityScale", "not numeric"), ("AngularVelocityScaleSlope", -1)]:
                 invalid_gain = copy.deepcopy(document)

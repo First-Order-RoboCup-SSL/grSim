@@ -407,12 +407,42 @@ void SSLWorld::stepSimulation(dReal dt) {
     frame_num ++;
 }
 
+bool SSLWorld::shellsMayMeet(dReal frameStep) const
+{
+    // A frame of lookahead plus 5cm makes the refinement decision before
+    // first impact, rather than switching on an existing contact's depth.
+    const int count = cfg->Robots_Count() * 2;
+    for (int first = 0; first < count; ++first) {
+        const auto* p1 = dGeomGetPosition(robots[first]->dummy->geom);
+        const auto* v1 = dBodyGetLinearVel(robots[first]->chassis->body);
+        const dReal speed1 = std::sqrt(v1[0]*v1[0] + v1[1]*v1[1] + v1[2]*v1[2]);
+        for (int second = first + 1; second < count; ++second) {
+            const auto* v2 = dBodyGetLinearVel(robots[second]->chassis->body);
+            const dReal speed2 = std::sqrt(v2[0]*v2[0] + v2[1]*v2[1] + v2[2]*v2[2]);
+            const dReal reach = robots[first]->settings.RobotRadius +
+                robots[second]->settings.RobotRadius + 0.05 + frameStep*(speed1 + speed2);
+            const auto* p2 = dGeomGetPosition(robots[second]->dummy->geom);
+            dReal distanceSquared = 0;
+            for (int axis = 0; axis < 3; ++axis) {
+                const dReal separation = p1[axis] - p2[axis];
+                distanceSquared += separation * separation;
+            }
+            if (distanceSquared <= reach * reach) return true;
+        }
+    }
+    return false;
+}
+
 void SSLWorld::stepPhysics(dReal dt, const PhysicsStepOptions& options,
                           PWorld::StepStatistics* statistics) {
     if (!std::isfinite(dt) || dt <= 0 || !options.substeps)
         throw std::invalid_argument("Invalid physics timestep");
     legacyBallFrictionActive = options.legacyBallFriction;
-    for (unsigned kk=0; kk < options.substeps; ++kk) {
+    // Keep free motion on the nominal schedule. Nearby shells use six even
+    // steps for the entire frame, avoiding a velocity-dependent per-contact mesh.
+    const unsigned substeps = options.refineShellImpacts && shellsMayMeet(dt)
+        ? std::max(options.substeps, 6u) : options.substeps;
+    for (unsigned kk=0; kk < substeps; ++kk) {
         if (options.finiteWheelRotation) {
             for (int k=0; k < cfg->Robots_Count() * 2; ++k) {
                 for (auto* wheel : robots[k]->wheels) {
@@ -442,7 +472,7 @@ void SSLWorld::stepPhysics(dReal dt, const PhysicsStepOptions& options,
                 dBodySetLinearVel(ball->body, 0, 0, 0);
             }
         }
-        if (!p->step(dt/options.substeps, options.quickStepIterations, statistics))
+        if (!p->step(dt/substeps, options.quickStepIterations, statistics))
             throw std::runtime_error("ODE physics step failed");
     }
 

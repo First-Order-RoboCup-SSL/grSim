@@ -279,6 +279,7 @@ QJsonObject runScenario(SimulationSettings settings, const Variant& variant, con
     std::vector<std::unique_ptr<WheelContact>> contexts;
     const double complianceScale=applyVariant(world, variant, contexts, substeps, normalizeCompliance);
     PhysicsStepOptions options;
+    options.refineShellImpacts = variant.systemDefaults;
     options.substeps = substeps;
     options.quickStepIterations = variant.iterations;
     options.legacyBallFriction = variant.rollingScale == 0;

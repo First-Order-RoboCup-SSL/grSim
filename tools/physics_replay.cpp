@@ -423,19 +423,32 @@ int main(int argc, char** argv)
             }
         }
         if (recordFile.isEmpty() == replayFile.isEmpty() ||
-            (!fixture.isEmpty() && fixture != "spaced" && fixture != "pushing") ||
+            (!fixture.isEmpty() && fixture != "spaced" && fixture != "pushing" && fixture != "pushing-turning") ||
             (!recordFile.isEmpty() && fixture.isEmpty() && !durationMs) ||
             (!fixture.isEmpty() && durationMs) ||
             (!replayFile.isEmpty() && (!fixture.isEmpty() || durationMs || !settingsFile.isEmpty())))
-            throw std::runtime_error("Use --record FILE with --fixture spaced|pushing or --duration-ms N, or --replay FILE");
+            throw std::runtime_error("Use --record FILE with --fixture spaced|pushing|pushing-turning or --duration-ms N, or --replay FILE");
         QJsonObject recording;
         SimulationSettings settings;
+        PhysicsStepOptions physicsOptions;
         if (!replayFile.isEmpty()) {
             recording = readJson(replayFile);
-            if (recording["format"] != "grsim-physics-replay-v1" ||
+            const bool historical = recording["format"] == "grsim-physics-replay-v1";
+            if ((!historical && recording["format"] != "grsim-physics-replay-v2") ||
                 recording["ode_version"] != QString::fromLatin1(dODE_VERSION) ||
                 integer(recording, "substeps", 5) != 5)
                 throw std::runtime_error("Incompatible replay format or ODE version");
+            // Missing policy is the historical fixed-five integrator.
+            const auto policy = recording.value("integration_policy");
+            if (historical) {
+                if (!policy.isUndefined() && policy != "fixed-5-v1")
+                    throw std::runtime_error("Unsupported historical integration policy");
+                physicsOptions.refineShellImpacts = false;
+            } else {
+                if (policy != "fixed-5-v1" && policy != "near-shell-6-v1")
+                    throw std::runtime_error("Missing or unsupported integration policy");
+                physicsOptions.refineShellImpacts = policy == "near-shell-6-v1";
+            }
             seed = integer(recording, "seed", std::numeric_limits<unsigned>::max());
             ticks = integer(recording, "ticks", 1000000);
             if (!recording["events"].isArray() || !recording["initial"].isObject())
@@ -468,14 +481,15 @@ int main(int argc, char** argv)
             if (!replayFile.isEmpty() && !sameInitialState(initial, recording["initial"]))
                 throw std::runtime_error("Initial world differs from the recorded configuration");
             if (!recordFile.isEmpty()) {
-                recording = {{"format", "grsim-physics-replay-v1"},
+                recording = {{"format", "grsim-physics-replay-v2"},
                     {"build_revision", QString::fromLatin1(GRSIM_REPLAY_REVISION)},
                     {"cpu_architecture", QSysInfo::currentCpuArchitecture()}, {"recorded_helpers", int(helpers)},
                     {"ode_version", QString::fromLatin1(dODE_VERSION)},
                     {"ode_configuration", QString::fromLatin1(dGetConfiguration())},
                     {"math_backend", QString::fromLatin1(GRSIM_ODE_MATH_BACKEND)},
                     {"triangular_backend", QString::fromLatin1(triangularBackend())},
-                    {"seed", double(seed)}, {"substeps", 5}, {"settings", saveSettings(settings)}, {"initial", initial}};
+                    {"seed", double(seed)}, {"substeps", 5}, {"settings", saveSettings(settings)}, {"initial", initial},
+                    {"integration_policy", "near-shell-6-v1"}};
             }
             QJsonArray events = recording["events"].toArray(), checkpoints;
             checkpoints.append(initial);
@@ -489,7 +503,7 @@ int main(int argc, char** argv)
                     maximumShellPenetration = std::max(maximumShellPenetration, double(contact.geom.depth));
             };
             auto step = [&]() {
-                world.stepPhysics(settings.DeltaTime(), PhysicsStepOptions(), &statistics);
+                world.stepPhysics(settings.DeltaTime(), physicsOptions, &statistics);
                 ++tick;
                 if (tick % checkpointEvery == 0) checkpoints.append(state(world, tick));
             };
@@ -499,6 +513,7 @@ int main(int argc, char** argv)
                 return response;
             };
             if (!fixture.isEmpty()) {
+                const bool dense = fixture != "spaced";
                 SimulatorCommand placement;
                 auto* ball = placement.mutable_control()->mutable_teleport_ball();
                 ball->set_x(4); ball->set_y(-3); ball->set_z(settings.BallRadius());
@@ -507,9 +522,9 @@ int main(int argc, char** argv)
                     for (int id = 0; id < settings.Robots_Count(); ++id) {
                         auto* robot = placement.mutable_control()->add_teleport_robot();
                         robot->mutable_id()->set_id(id); robot->mutable_id()->set_team(team ? YELLOW : BLUE);
-                        const int col = fixture == "pushing" ? (team ? 2 + id % 2 : 1 - id % 2) : team * 3 + id % 3;
-                        robot->set_x((col - 2.5) * (fixture == "pushing" ? .185 : .7));
-                        robot->set_y((id / (fixture == "pushing" ? 2 : 3) - 1) * (fixture == "pushing" ? .185 : .7));
+                        const int col = dense ? (team ? 2 + id % 2 : 1 - id % 2) : team * 3 + id % 3;
+                        robot->set_x((col - 2.5) * (dense ? .185 : .7));
+                        robot->set_y((id / (dense ? 2 : 3) - 1) * (dense ? .185 : .7));
                         robot->set_orientation(team ? M_PI : 0);
                     }
                 accept(commandEvent(tick, "simulator_control", placement));
@@ -522,8 +537,14 @@ int main(int argc, char** argv)
                             for (int id = 0; id < settings.Robots_Count(); ++id) {
                                 auto* robot = command.add_robot_commands(); robot->set_id(id);
                                 auto* velocity = robot->mutable_move_command()->mutable_local_velocity();
-                                velocity->set_forward(tick < ticks * 2 / 3 ? (fixture == "pushing" ? .5 : .15) : 0);
-                                velocity->set_left(0); velocity->set_angular(fixture == "pushing" ? 0 : .2);
+                                velocity->set_left(0);
+                                if (fixture == "pushing-turning") {
+                                    velocity->set_forward(.5);
+                                    velocity->set_angular(id % 2 ? -2 : 2);
+                                } else {
+                                    velocity->set_forward(tick < ticks * 2 / 3 ? (dense ? .5 : .15) : 0);
+                                    velocity->set_angular(dense ? 0 : .2);
+                                }
                             }
                             accept(commandEvent(tick, "robot_control", command, team));
                         }
@@ -616,7 +637,8 @@ int main(int argc, char** argv)
                 {"math_backend", QString::fromLatin1(GRSIM_ODE_MATH_BACKEND)},
                     {"triangular_backend", QString::fromLatin1(triangularBackend())},
                 {"checkpoints", checkpoints}, {"max_shell_penetration_m", maximumShellPenetration},
-                {"contacts", double(statistics.contacts)}};
+                {"contacts", double(statistics.contacts)}, {"integration_steps", double(statistics.integrationSteps)},
+                {"integration_policy", physicsOptions.refineShellImpacts ? "near-shell-6-v1" : "fixed-5-v1"}};
         } catch (...) {
             dCleanupODEAllDataForThread(); dCloseODE(); throw;
         }

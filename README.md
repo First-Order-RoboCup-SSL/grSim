@@ -167,14 +167,18 @@ bin/grSim_replay --replay /tmp/pushing.json --helpers 0 > /tmp/serial.json
 bin/grSim_replay --replay /tmp/pushing.json --helpers 3 > /tmp/workers.json
 ```
 
-Both fixture modes use six robots per side. For a bounded loopback command
+All fixture modes use six robots per side. `pushing-turning` adds sustained
+pushing with alternating turns for first-impact collision coverage. For a bounded loopback command
 capture, use `--record FILE --duration-ms 5000 --blue-port 10301 --yellow-port
 10302 --sim-port 10300`. The tool announces its ports, returns command feedback,
 and records command-watchdog expiry as explicit events. `--settings FILE` uses
 an existing grSim configuration when recording; replay reads its saved settings.
 The capture is a fresh headless physics session, with no vision publication,
 GUI edits, world configuration changes or arbitrary mid-match checkpoints.
-Replays retain the direct double-precision solver and five substeps. Compare
+Replays retain the direct double-precision solver. New v2 recordings store the
+integration policy: five steps per fixed tick in free motion, six near robot
+shells for finer first-impact resolution. Historical v1 recordings retain their
+fixed-five path; older binaries reject v2 rather than silently changing it. Compare
 numerical trajectories within a chosen tolerance across backends; identical
 bits on different CPUs are not promised.
 
@@ -221,4 +225,4 @@ an external hardware-noise layer. Use one actuator-response model in the stack.
 
 For physics comparisons, `grSim_replay --replay FILE --checkpoint-every 1` saves
 every simulation tick. The default interval remains 30 ticks; diagnostics do not
-change the fixed timestep or five ODE substeps.
+change the fixed timestep or recorded integration policy.
