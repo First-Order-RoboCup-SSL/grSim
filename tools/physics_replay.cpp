@@ -514,7 +514,9 @@ int main(int argc, char** argv)
                     }
                 accept(commandEvent(tick, "simulator_control", placement));
                 while (tick < ticks) {
-                    if (tick % checkpointEvery == 0) {
+                    // Fixture inputs have their own fixed schedule. Changing
+                    // observation density must never alter the accepted commands.
+                    if (tick % 30 == 0) {
                         for (int team = 0; team < 2; ++team) {
                             RobotControl command;
                             for (int id = 0; id < settings.Robots_Count(); ++id) {

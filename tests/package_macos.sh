@@ -9,6 +9,9 @@ qt_prefix="$(brew --prefix qt@5)"
 "$qt_prefix/bin/macdeployqt" "$app" -always-overwrite -verbose=2
 test "$(lipo -archs "$app/Contents/MacOS/grSim")" = arm64
 test -f "$app/Contents/Resources/config/Parsian.ini"
+test -f "$app/Contents/Resources/config/Utama-Radio-0.ini"
+test -f "$app/Contents/Resources/config/Utama-Radio-1.ini"
+test -f "$app/Contents/Resources/config/Utama-Field-20261028.xml"
 test -f "$app/Contents/PlugIns/platforms/libqcocoa.dylib"
 
 # Complete transitive dependencies before removing development search paths.
@@ -27,4 +30,6 @@ ditto -x -k "$archive" "$relocated"
     cd "$relocated"
     unset QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH QML2_IMPORT_PATH DYLD_LIBRARY_PATH DYLD_FRAMEWORK_PATH
     QT_DEBUG_PLUGINS=1 ./grSim.app/Contents/MacOS/grSim --smoke-test
+    ./grSim.app/Contents/MacOS/grSim --smoke-test \
+        --settings "$PWD/grSim.app/Contents/Resources/config/Utama-Field-20261028.xml"
 )

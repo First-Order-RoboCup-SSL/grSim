@@ -773,7 +773,8 @@ void SSLWorld::processTeleportRobot(const TeleportRobot &teleBot, Robot *robot) 
 
     dReal vxLocal = (vx * cos(-orientation)) - (vy * sin(-orientation));
     dReal vyLocal = (vy * cos(-orientation)) + (vx * sin(-orientation));
-    robot->setSpeed(vxLocal, vyLocal, vAngular);
+    // Teleport velocities are state targets, not hardware actuation commands.
+    robot->setSpeed(vxLocal, vyLocal, vAngular, false);
 
     if (teleBot.has_present()) {
         robot->on = teleBot.present();

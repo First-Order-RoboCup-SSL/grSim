@@ -209,7 +209,8 @@ them. Response is validated for the observed drives (up to 1 m/s) and turns
 
 Local/global body-velocity commands use separate forward/left gains and angular
 gain `AngularVelocityScale + AngularVelocityScaleSlope * abs(requested_turn)`.
-Raw wheel-speed commands keep their existing meaning. General models retain unit
+Teleport velocity targets and raw wheel-speed commands keep their existing meaning.
+General models retain unit
 gains and zero slope. Camera/radio delay, vision noise, kicker charge and dribbler
 loss are separate effects; this profile does not fit those into ODE or duplicate
 an external hardware-noise layer. Use one actuator-response model in the stack.

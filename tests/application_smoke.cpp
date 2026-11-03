@@ -26,9 +26,11 @@ int runApplicationSmokeTest(QApplication& app, const QString& settingsPath)
     const quint16 controlPort = reserve.localPort();
     reserve.close();
     auto* config = new ConfigWidget(false, settingsPath);
-    config->v_BlueTeam->setString("Parsian");
-    config->v_YellowTeam->setString("Parsian");
-    config->loadRobotsSettings();
+    if (settingsPath.isEmpty()) {
+        config->v_BlueTeam->setString("Parsian");
+        config->v_YellowTeam->setString("Parsian");
+        config->loadRobotsSettings();
+    }
     std::printf("Settings: rolling_deceleration=%.2f\n", config->BallRollingDeceleration());
     const auto model = config->simulationSettings().blueSettings;
     const bool resources = std::abs(model.RobotHeight - 0.147) < 1e-9 &&

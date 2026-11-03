@@ -31,6 +31,11 @@ def run(args, accepted=True, step_seconds=1 / 60):
     assert result.returncode != 0, "invalid recording was accepted"
 
 
+def message(field, payload):
+    assert len(payload) < 128
+    return bytes([(field << 3) | 2, len(payload)]) + payload
+
+
 def difference(left, right):
     assert len(left["checkpoints"]) == len(right["checkpoints"])
     maximum = 0
@@ -97,6 +102,22 @@ with tempfile.TemporaryDirectory(prefix="grsim-replay-") as directory:
     assert commanded["checkpoints"][0]["bodies"][0]["position"][0] == 2
     assert commanded["checkpoints"][0]["simulation_time"] == document["initial"]["simulation_time"]
     print("PASS short and zero-tick capture timelines replay exactly, including terminal commands", flush=True)
+    # Explicit teleport velocities keep their historical unscaled semantics.
+    identity = b"\x08\x00\x10\x02"  # robot 0, BLUE
+    velocity_fields = (b"\x2d" + struct.pack("<f", .1) + b"\x35" + struct.pack("<f", .2) +
+                       b"\x3d" + struct.pack("<f", .3))
+    teleport = message(1, message(2, message(1, identity) + velocity_fields))
+    document["events"] = [{"tick": 0, "kind": "simulator_control",
+                           "data": base64.b64encode(teleport).decode("ascii")}]
+    path.write_text(json.dumps(document))
+    unit_teleport = run(["--replay", str(path)], step_seconds=.1)
+    document["settings"]["blueSettings"].update(
+        ForwardVelocityScale=.962, LeftVelocityScale=.924,
+        AngularVelocityScale=.958, AngularVelocityScaleSlope=.023)
+    path.write_text(json.dumps(document))
+    calibrated_teleport = run(["--replay", str(path)], step_seconds=.1)
+    assert unit_teleport["checkpoints"][0]["robots"][0]["wheel_commands"] == calibrated_teleport["checkpoints"][0]["robots"][0]["wheel_commands"]
+    print("PASS calibrated robot response does not alter teleport velocity targets", flush=True)
     profile_path = Path(__file__).resolve().parents[1] / "config" / "Utama-Field-20261028.xml"
     profile_recording = directory / "field-profile.json"
     run(["--record", str(profile_recording), "--fixture", "spaced", "--ticks", "30",
@@ -130,6 +151,13 @@ with tempfile.TemporaryDirectory(prefix="grsim-replay-") as directory:
             for interval in ["0", "1000001"]:
                 run(["--replay", str(path), "--checkpoint-every", interval], accepted=False)
             print("PASS per-tick physics snapshots preserve the original replay trajectory", flush=True)
+            dense_path = directory / "dense-recording.json"
+            dense_record = run(["--record", str(dense_path), "--fixture", "spaced",
+                                "--ticks", "180", "--checkpoint-every", "1"])
+            assert json.loads(dense_path.read_text())["events"] == document["events"]
+            sampled_record = dict(dense_record, checkpoints=[point for point in dense_record["checkpoints"] if point["tick"] % 30 == 0])
+            assert difference(recorded, sampled_record) <= 1e-12
+            print("PASS recording snapshot density leaves fixture commands and physics unchanged", flush=True)
             delayed = copy.deepcopy(document)
             for event in delayed["events"]:
                 if event["kind"] == "robot_control" and event["tick"] == 0:
@@ -196,9 +224,6 @@ with tempfile.TemporaryDirectory(prefix="grsim-replay-") as directory:
         simulator_port = int(re.search(r"simulator=(\d+)", ready).group(1))
         # Reject the whole batch before applying its ball or robot teleports,
         # including explicitly present false-valued unsupported flags.
-        def message(field, payload):
-            assert len(payload) < 128
-            return bytes([(field << 3) | 2, len(payload)]) + payload
         identity = b"\x08\x00\x10\x02"  # robot 0, BLUE
         teleport_robot = message(1, identity) + b"\x15" + struct.pack("<f", 4)
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as simulator:
