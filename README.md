@@ -207,6 +207,10 @@ Geometry and masses remain assumptions from Parsian; these logs do not measure
 them. Response is validated for the observed drives (up to 1 m/s) and turns
 (1–4 rad/s), not all possible commands.
 
+The radio 1 profile also uses 125 rad/s² angular speedup/braking limits, selected
+from comparisons that held out entire recordings. This is a fitted simulator
+control setting; it is not a direct measurement of hardware acceleration.
+
 Local/global body-velocity commands use separate forward/left gains and angular
 gain `AngularVelocityScale + AngularVelocityScaleSlope * abs(requested_turn)`.
 Teleport velocity targets and raw wheel-speed commands keep their existing meaning.
