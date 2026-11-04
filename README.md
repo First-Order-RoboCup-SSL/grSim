@@ -123,7 +123,7 @@ Citing
 
 If you use this in your research, please cite the original paper:
 ```
-`inproceedings{Monajjemi2011grSimR,
+@inproceedings{Monajjemi2011grSimR,
   title={grSim - RoboCup Small Size Robot Soccer Simulator},
   author={Valiallah Monajjemi and A. Koochakzadeh and S. S. Ghidary},
   booktitle={RoboCup},
@@ -134,7 +134,7 @@ If you use this in your research, please cite the original paper:
 If you wish to cite this repo with it's modifications specifically, please cite:
 
 ```
-`misc{grsim2021,
+@misc{grsim2021,
   author = {Mohammad Mahdi Rahimi and Jan Segre and Valiallah Monajjemi and A. Koochakzadeh and Sepehr MohaimenianPour and Nicolai Ommer and  Avatar
 Kazunori Kimura and Jeremy Feltracco and Kenta Sato and Atousa Ahsani},
   title = {GRSIM},
@@ -167,8 +167,9 @@ bin/grSim_replay --replay /tmp/pushing.json --helpers 0 > /tmp/serial.json
 bin/grSim_replay --replay /tmp/pushing.json --helpers 3 > /tmp/workers.json
 ```
 
-All fixture modes use six robots per side. `pushing-turning` adds sustained
-pushing with alternating turns for first-impact collision coverage. For a bounded loopback command
+All fixture modes use six robots per side. `pushing-turning` and
+`pushing-turning-fast` add sustained pushing with alternating 2 and 4 rad/s
+turn commands for first-impact collision coverage. For a bounded loopback command
 capture, use `--record FILE --duration-ms 5000 --blue-port 10301 --yellow-port
 10302 --sim-port 10300`. The tool announces its ports, returns command feedback,
 and records command-watchdog expiry as explicit events. `--settings FILE` uses
@@ -180,7 +181,8 @@ integration policy. The default adaptive policy uses two steps for settled,
 distant motion, at least five during acceleration, turning, sliding or flight,
 and finer steps for predicted robot, ball and wall impacts. All bodies share
 the same evenly divided fixed tick; short settling guards avoid rapidly
-switching the resolution. Historical v1 recordings retain their fixed-five path; older binaries reject v2 rather than silently changing it. Compare
+switching the resolution. Historical v1 recordings retain their fixed-five path; older binaries reject v2 rather than silently changing it.
+Compare
 numerical trajectories within a chosen tolerance across backends; identical
 bits on different CPUs are not promised.
 

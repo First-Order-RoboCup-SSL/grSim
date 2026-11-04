@@ -105,6 +105,8 @@ public:
                      PWorld::StepStatistics* statistics = nullptr);
     // Apply the same ball material, mass and optional damping on startup/edit.
     void updateBallPhysics();
+    // Restart fine integration after any externally applied pose/reset edit.
+    void restartIntegrationSettling();
     std::shared_ptr<SceneSnapshot> snapshot(quint64 generation) const;
     SSL_WrapperPacket* generatePacket(int cam_id=0);
     void addFieldLinesArcs(SSL_GeometryFieldSize *field);

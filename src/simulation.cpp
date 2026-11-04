@@ -268,19 +268,26 @@ void SimulationWorker::act(SimulationAction action)
     auto releaseBall = [this]() {
         for (int i = 0; i < settings.Robots_Count() * 2; ++i) world->robots[i]->kicker->unholdBall();
     };
+    bool placed = false;
     switch (action.kind) {
-    case SimulationActionKind::ResetRobot: if (robot) robot->resetRobot(); break;
-    case SimulationActionKind::SetRobotEnabled: if (robot) robot->on = action.enabled; break;
+    case SimulationActionKind::ResetRobot:
+        if (robot) { robot->resetRobot(); placed = true; }
+        break;
+    case SimulationActionKind::SetRobotEnabled:
+        if (robot) { robot->on = action.enabled; placed = true; }
+        break;
     case SimulationActionKind::PlaceRobot:
         if (robot) {
             robot->setXY(action.x, action.y);
             if (action.reset) robot->resetRobot();
             if (action.reset) robot->setDir(action.direction);
+            placed = true;
         }
         break;
     case SimulationActionKind::PlaceBall:
         releaseBall();
         world->ball->setBodyPosition(action.x, action.y, action.z);
+        placed = true;
         dBodySetForce(world->ball->body, 0, 0, 0);
         dBodySetTorque(world->ball->body, 0, 0, 0);
         dBodySetLinearVel(world->ball->body, 0, 0, 0);
@@ -318,6 +325,7 @@ void SimulationWorker::act(SimulationAction action)
         if (action.team < 0 || action.team > 1 || action.formation < 0 || action.formation > 3) break;
         RobotsFormation formation(static_cast<E_FORMATION>(action.formation), &settings);
         formation.resetRobots(world->robots, action.team);
+        placed = true;
         break;
     }
     case SimulationActionKind::EnableTeam:
@@ -325,6 +333,7 @@ void SimulationWorker::act(SimulationAction action)
             for (int i = 0; i < count; ++i) world->robots[world->robotIndex(i, action.team)]->on = action.enabled;
         break;
     }
+    if (placed) world->restartIntegrationSettling();
     publish();
 }
 

@@ -433,6 +433,13 @@ bool SSLWorld::shellsMayMeet(dReal frameStep) const
     return false;
 }
 
+void SSLWorld::restartIntegrationSettling()
+{
+    adaptiveWarmupUntil = sim_time + 1;
+    quietFrames = resolutionDecayFrames = 0;
+    adaptiveResolution = 5;
+}
+
 unsigned SSLWorld::adaptiveSubsteps(dReal frameStep, unsigned minimum)
 {
     constexpr unsigned normalSteps = 5;
@@ -699,6 +706,7 @@ void SSLWorld::recvActions() {
                 }
             }
             if (grSimPacket.has_replacement()) {
+                bool replaced = false;
                 for (int i=0; i < grSimPacket.replacement().robots_size(); i++) {
                     int team = 0;
                     if (grSimPacket.replacement().robots(i).has_yellowteam() && grSimPacket.replacement().robots(i).yellowteam()) team = 1;
@@ -717,6 +725,7 @@ void SSLWorld::recvActions() {
                     robots[id]->resetRobot();
                     robots[id]->setDir(dir);
                     robots[id]->on = turn_on;
+                    replaced = true;
                 }
                 if (grSimPacket.replacement().has_ball()) {
                     dReal x = 0, y = 0, z = 0, vx = 0, vy = 0;
@@ -734,7 +743,9 @@ void SSLWorld::recvActions() {
                     ball->setBodyPosition(x,y,cfg->BallRadius()*1.2);
                     dBodySetLinearVel(ball->body,vx,vy,0);
                     dBodySetAngularVel(ball->body,0,0,0);
+                    replaced = true;
                 }
+                if (replaced) restartIntegrationSettling();
             }
         }
 
@@ -822,9 +833,8 @@ void SSLWorld::processSimControl(const SimulatorCommand &simulatorCommand, Simul
     if(simulatorCommand.has_control()) {
         if(simulatorCommand.control().has_teleport_ball()) {
             auto teleBall = simulatorCommand.control().teleport_ball();
-            const int previousErrors = simulatorResponse.errors_size();
             processTeleportBall(simulatorResponse, teleBall);
-            teleported = simulatorResponse.errors_size() == previousErrors;
+            teleported = true;
         }
         
         for(const auto &teleBot : simulatorCommand.control().teleport_robot()) {
@@ -838,11 +848,7 @@ void SSLWorld::processSimControl(const SimulatorCommand &simulatorCommand, Simul
             teleported = true;
         }
     }
-    if (teleported) {
-        adaptiveWarmupUntil = sim_time + 1;
-        quietFrames = resolutionDecayFrames = 0;
-        adaptiveResolution = 5;
-    }
+    if (teleported) restartIntegrationSettling();
 
     if (simulatorCommand.has_config()) {
         if (simulatorCommand.config().has_geometry()
