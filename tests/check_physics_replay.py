@@ -18,13 +18,13 @@ binary = str(Path(sys.argv[1]).resolve())
 env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
 
 
-def run(args, accepted=True, step_seconds=1 / 60):
+def run(args, accepted=True, step_seconds=1 / 60, substeps=5):
     result = subprocess.run([binary, *args], env=env, capture_output=True, text=True, timeout=30)
     if accepted:
         assert result.returncode == 0, result.stderr
         assert "ODE Message" not in result.stderr and "ODE Error" not in result.stderr, result.stderr
         value = json.loads(result.stdout)
-        assert value["success"] and value["substeps"] == 5
+        assert value["success"] and value["substeps"] == substeps
         assert abs(value["step_seconds"] - step_seconds) < 1e-12
         assert value["max_shell_penetration_m"] <= 0.002, value["max_shell_penetration_m"]
         return value
@@ -129,6 +129,21 @@ with tempfile.TemporaryDirectory(prefix="grsim-replay-") as directory:
         assert tuple(field_settings[name][key] for key in
                      ["ForwardVelocityScale", "LeftVelocityScale", "AngularVelocityScale", "AngularVelocityScaleSlope"]) == expected
     print("PASS physical robot profiles and measured ball settings load and record explicitly", flush=True)
+    fixed_document = json.loads(profile_recording.read_text())
+    fixed_document["integration_policy"] = "fixed-v1"
+    fixed_results = {}
+    fixed_path = directory / "fixed-step-count.json"
+    for count in [1, 2, 3, 5]:
+        fixed_document["substeps"] = count
+        fixed_path.write_text(json.dumps(fixed_document))
+        fixed_results[count] = run(["--replay", str(fixed_path)], substeps=count)
+        assert fixed_results[count]["integration_steps"] == fixed_results[count]["ticks"] * count
+    assert difference(fixed_results[1], fixed_results[5]) > 1e-8
+    for count in [0, 33]:
+        fixed_document["substeps"] = count
+        fixed_path.write_text(json.dumps(fixed_document))
+        run(["--replay", str(fixed_path)], accepted=False)
+    print("PASS explicit fixed step counts alter integration without changing the tick clock", flush=True)
     # Fast initial shell contact must meet the same overlap bound while turning.
     turning_path = directory / "pushing-turning.json"
     turning = run(["--record", str(turning_path), "--fixture", "pushing-turning",

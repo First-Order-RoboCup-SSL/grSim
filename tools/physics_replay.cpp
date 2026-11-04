@@ -431,24 +431,31 @@ int main(int argc, char** argv)
         QJsonObject recording;
         SimulationSettings settings;
         PhysicsStepOptions physicsOptions;
+        QString integrationPolicy = "near-shell-6-v1";
         if (!replayFile.isEmpty()) {
             recording = readJson(replayFile);
             const bool historical = recording["format"] == "grsim-physics-replay-v1";
             if ((!historical && recording["format"] != "grsim-physics-replay-v2") ||
-                recording["ode_version"] != QString::fromLatin1(dODE_VERSION) ||
-                integer(recording, "substeps", 5) != 5)
+                recording["ode_version"] != QString::fromLatin1(dODE_VERSION))
                 throw std::runtime_error("Incompatible replay format or ODE version");
             // Missing policy is the historical fixed-five integrator.
+            const unsigned recordedSteps = integer(recording, "substeps", 32);
+            if (recordedSteps == 0) throw std::runtime_error("Invalid integration step count");
             const auto policy = recording.value("integration_policy");
             if (historical) {
-                if (!policy.isUndefined() && policy != "fixed-5-v1")
+                if (recordedSteps != 5 || (!policy.isUndefined() && policy != "fixed-5-v1"))
                     throw std::runtime_error("Unsupported historical integration policy");
+                integrationPolicy = "fixed-5-v1";
                 physicsOptions.refineShellImpacts = false;
             } else {
-                if (policy != "fixed-5-v1" && policy != "near-shell-6-v1")
+                if (policy != "fixed-5-v1" && policy != "near-shell-6-v1" && policy != "fixed-v1")
                     throw std::runtime_error("Missing or unsupported integration policy");
+                if (policy != "fixed-v1" && recordedSteps != 5)
+                    throw std::runtime_error("Legacy integration policy requires five steps");
+                integrationPolicy = policy.toString();
                 physicsOptions.refineShellImpacts = policy == "near-shell-6-v1";
             }
+            physicsOptions.substeps = recordedSteps;
             seed = integer(recording, "seed", std::numeric_limits<unsigned>::max());
             ticks = integer(recording, "ticks", 1000000);
             if (!recording["events"].isArray() || !recording["initial"].isObject())
@@ -488,8 +495,8 @@ int main(int argc, char** argv)
                     {"ode_configuration", QString::fromLatin1(dGetConfiguration())},
                     {"math_backend", QString::fromLatin1(GRSIM_ODE_MATH_BACKEND)},
                     {"triangular_backend", QString::fromLatin1(triangularBackend())},
-                    {"seed", double(seed)}, {"substeps", 5}, {"settings", saveSettings(settings)}, {"initial", initial},
-                    {"integration_policy", "near-shell-6-v1"}};
+                    {"seed", double(seed)}, {"substeps", int(physicsOptions.substeps)}, {"settings", saveSettings(settings)}, {"initial", initial},
+                    {"integration_policy", integrationPolicy}};
             }
             QJsonArray events = recording["events"].toArray(), checkpoints;
             checkpoints.append(initial);
@@ -630,7 +637,7 @@ int main(int argc, char** argv)
             recording["events"] = events;
             if (!recordFile.isEmpty()) writeJson(recordFile, recording);
             result = {{"success", true}, {"ticks", int(tick)}, {"helpers", int(helpers)},
-                {"step_seconds", settings.DeltaTime()}, {"substeps", 5},
+                {"step_seconds", settings.DeltaTime()}, {"substeps", int(physicsOptions.substeps)},
                 {"ode_version", QString::fromLatin1(dODE_VERSION)},
                 {"build_revision", QString::fromLatin1(GRSIM_REPLAY_REVISION)},
                 {"cpu_architecture", QSysInfo::currentCpuArchitecture()},
@@ -638,7 +645,7 @@ int main(int argc, char** argv)
                     {"triangular_backend", QString::fromLatin1(triangularBackend())},
                 {"checkpoints", checkpoints}, {"max_shell_penetration_m", maximumShellPenetration},
                 {"contacts", double(statistics.contacts)}, {"integration_steps", double(statistics.integrationSteps)},
-                {"integration_policy", physicsOptions.refineShellImpacts ? "near-shell-6-v1" : "fixed-5-v1"}};
+                {"integration_policy", integrationPolicy}};
         } catch (...) {
             dCleanupODEAllDataForThread(); dCloseODE(); throw;
         }
