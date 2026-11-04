@@ -123,7 +123,7 @@ Citing
 
 If you use this in your research, please cite the original paper:
 ```
-@inproceedings{Monajjemi2011grSimR,
+`inproceedings{Monajjemi2011grSimR,
   title={grSim - RoboCup Small Size Robot Soccer Simulator},
   author={Valiallah Monajjemi and A. Koochakzadeh and S. S. Ghidary},
   booktitle={RoboCup},
@@ -134,7 +134,7 @@ If you use this in your research, please cite the original paper:
 If you wish to cite this repo with it's modifications specifically, please cite:
 
 ```
-@misc{grsim2021,
+`misc{grsim2021,
   author = {Mohammad Mahdi Rahimi and Jan Segre and Valiallah Monajjemi and A. Koochakzadeh and Sepehr MohaimenianPour and Nicolai Ommer and  Avatar
 Kazunori Kimura and Jeremy Feltracco and Kenta Sato and Atousa Ahsani},
   title = {GRSIM},
@@ -176,9 +176,11 @@ an existing grSim configuration when recording; replay reads its saved settings.
 The capture is a fresh headless physics session, with no vision publication,
 GUI edits, world configuration changes or arbitrary mid-match checkpoints.
 Replays retain the direct double-precision solver. New v2 recordings store the
-integration policy: five steps per fixed tick in free motion, six near robot
-shells for finer first-impact resolution. Historical v1 recordings retain their
-fixed-five path; older binaries reject v2 rather than silently changing it. Compare
+integration policy. The default adaptive policy uses two steps for settled,
+distant motion, at least five during acceleration, turning, sliding or flight,
+and finer steps for predicted robot, ball and wall impacts. All bodies share
+the same evenly divided fixed tick; short settling guards avoid rapidly
+switching the resolution. Historical v1 recordings retain their fixed-five path; older binaries reject v2 rather than silently changing it. Compare
 numerical trajectories within a chosen tolerance across backends; identical
 bits on different CPUs are not promised.
 

@@ -18,7 +18,7 @@ binary = str(Path(sys.argv[1]).resolve())
 env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
 
 
-def run(args, accepted=True, step_seconds=1 / 60, substeps=5):
+def run(args, accepted=True, step_seconds=1 / 60, substeps=2):
     result = subprocess.run([binary, *args], env=env, capture_output=True, text=True, timeout=30)
     if accepted:
         assert result.returncode == 0, result.stderr
@@ -32,8 +32,12 @@ def run(args, accepted=True, step_seconds=1 / 60, substeps=5):
 
 
 def message(field, payload):
-    assert len(payload) < 128
-    return bytes([(field << 3) | 2, len(payload)]) + payload
+    length = len(payload)
+    encoded = []
+    while length > 127:
+        encoded.append((length & 127) | 128)
+        length >>= 7
+    return bytes([(field << 3) | 2, *encoded, length]) + payload
 
 
 def difference(left, right):
@@ -144,22 +148,82 @@ with tempfile.TemporaryDirectory(prefix="grsim-replay-") as directory:
         fixed_path.write_text(json.dumps(fixed_document))
         run(["--replay", str(fixed_path)], accepted=False)
     print("PASS explicit fixed step counts alter integration without changing the tick clock", flush=True)
-    # Fast initial shell contact must meet the same overlap bound while turning.
-    turning_path = directory / "pushing-turning.json"
-    turning = run(["--record", str(turning_path), "--fixture", "pushing-turning",
-                   "--ticks", "900", "--settings", str(profile_path)])
-    turning_workers = run(["--replay", str(turning_path), "--helpers", "3"])
-    # Keep the existing 3s cross-worker bound. Long forced-contact paths amplify
-    # roundoff even with the historical fixed-five integrator; full serial runs
-    # must instead repeat exactly, while both modes retain the 2mm contact bound.
-    turning_repeated = run(["--replay", str(turning_path), "--helpers", "0"])
-    assert difference(turning, turning_repeated) <= 1e-12
-    short_serial = dict(turning, checkpoints=[p for p in turning["checkpoints"] if p["tick"] <= 180])
-    short_workers = dict(turning_workers, checkpoints=[p for p in turning_workers["checkpoints"] if p["tick"] <= 180])
-    assert difference(short_serial, short_workers) <= 1e-6
-    assert turning["integration_policy"] == "near-shell-6-v1"
-    assert turning["integration_steps"] > turning["ticks"] * turning["substeps"]
-    print("PASS 6v6 pushing/turning stays within 2mm with serial and threaded ODE", flush=True)
+    def floats(*values):
+        return b"".join(bytes([(field << 3) | 5]) + struct.pack("<f", value)
+                        for field, value in enumerate(values, 1))
+
+    def input_event(tick, kind, payload, team=None):
+        event = dict(tick=tick, kind=kind, data=base64.b64encode(payload).decode("ascii"))
+        if team is not None:
+            event["team"] = team
+        return event
+
+    # Keep twelve robots present, with the other eleven outside each shot path.
+    # A late teleport also exercises settling after the initial warmup.
+    wall_y = (field_settings["Field_Width"] / 2 + field_settings["Field_Margin_Touch_Line"] +
+              field_settings["Field_Referee_Margin"])
+    for case in ["ball-back", "ball-front", "ball-wall", "robot-wall", "far-cruise"]:
+        target = (0, wall_y - .5, math.pi / 2) if case == "robot-wall" else (0, 0, 0)
+        if case == "far-cruise":
+            target = (-2, 0, 0)
+        control = message(1, floats(4, -3, 0, 0, 0, 0))
+        for team in range(2):
+            for robot in range(6):
+                pose = target if (team, robot) == (0, 0) else (-4 + robot * .5, 2 + team * .5, 0)
+                identity = bytes([8, robot, 16, 2 if team == 0 else 1])
+                control += message(2, message(1, identity) + b"\x15" + struct.pack("<f", pose[0]) +
+                                   b"\x1d" + struct.pack("<f", pose[1]) +
+                                   b"\x25" + struct.pack("<f", pose[2]))
+        impact = copy.deepcopy(json.loads(profile_recording.read_text()))
+        impact["ticks"] = 180
+        impact["events"] = [input_event(0, "simulator_control", message(1, control))]
+        if case.startswith("ball"):
+            shot = {"ball-back": (-.6, 0, 0, 2.2, 0, 0),
+                    "ball-front": (.6, 0, 0, -2.2, 0, 0),
+                    "ball-wall": (0, wall_y - .5, 0, 0, 2.2, 0)}[case]
+            # z=0 uses the existing teleport height: radius plus 5 mm.
+            impact["events"].append(input_event(90, "simulator_control", message(1, message(1, floats(*shot)))))
+        else:
+            speed = 1 if case == "robot-wall" else .5
+            command = message(1, b"\x08\x00" + message(2, message(2, floats(speed, 0, 0))))
+            impact["events"] += [input_event(tick, "robot_control", command, 0) for tick in range(60, 180, 3)]
+        impact_path = directory / (case + ".json")
+        impact_path.write_text(json.dumps(impact))
+        serial = run(["--replay", str(impact_path), "--checkpoint-every", "1"])
+        workers = run(["--replay", str(impact_path), "--helpers", "3", "--checkpoint-every", "1"])
+        repeated = run(["--replay", str(impact_path), "--checkpoint-every", "1"])
+        assert difference(serial, repeated) <= 1e-12
+        assert difference(serial, workers) <= 1e-6
+        for value in [serial, workers]:
+            assert value["max_ball_solid_penetration_m"] <= .002
+            assert value["max_robot_wall_penetration_m"] <= .002
+        if case.startswith("ball"):
+            assert serial["max_ball_solid_penetration_m"] > 0
+            if case == "ball-wall":
+                assert min(p["bodies"][0]["velocity"][1] for p in serial["checkpoints"][90:]) < -.1
+        elif case == "robot-wall":
+            assert serial["max_robot_wall_penetration_m"] > 0
+            assert serial["checkpoints"][-1]["bodies"][1]["position"][1] < wall_y
+        else:
+            assert serial["integration_steps"] < 180 * 4
+            assert serial["checkpoints"][-1]["bodies"][1]["position"][0] > -1.2
+        print(f"PASS {case}: bounded impacts, serial repeat and worker agreement", flush=True)
+
+    # Both observed turn speeds must retain the 2 mm bound, including the
+    # previously failing 4 rad/s first-impact case.
+    for fixture in ["pushing-turning", "pushing-turning-fast"]:
+        turning_path = directory / (fixture + ".json")
+        turning = run(["--record", str(turning_path), "--fixture", fixture,
+                       "--ticks", "900", "--settings", str(profile_path)])
+        turning_workers = run(["--replay", str(turning_path), "--helpers", "3"])
+        turning_repeated = run(["--replay", str(turning_path), "--helpers", "0"])
+        assert difference(turning, turning_repeated) <= 1e-12
+        short_serial = dict(turning, checkpoints=[p for p in turning["checkpoints"] if p["tick"] <= 180])
+        short_workers = dict(turning_workers, checkpoints=[p for p in turning_workers["checkpoints"] if p["tick"] <= 180])
+        assert difference(short_serial, short_workers) <= 1e-6
+        assert turning["integration_policy"] == "adaptive-v1"
+        assert turning["integration_steps"] > turning["ticks"] * 5
+        print(f"PASS 6v6 {fixture}: <2mm contacts, exact serial repeat and short worker agreement", flush=True)
     for fixture in ["spaced", "pushing"]:
         path = directory / (fixture + ".json")
         recorded = run(["--record", str(path), "--fixture", fixture, "--ticks", "180"])
@@ -213,12 +277,13 @@ with tempfile.TemporaryDirectory(prefix="grsim-replay-") as directory:
             print("PASS omitted response fields retain exact unit-response physics", flush=True)
             fixed = copy.deepcopy(legacy)
             fixed["integration_policy"] = "fixed-5-v1"
+            fixed["substeps"] = 5
             changed.write_text(json.dumps(fixed))
-            fixed_result = run(["--replay", str(changed)])
+            fixed_result = run(["--replay", str(changed)], substeps=5)
             del fixed["integration_policy"]
             fixed["format"] = "grsim-physics-replay-v1"
             changed.write_text(json.dumps(fixed))
-            historical = run(["--replay", str(changed)])
+            historical = run(["--replay", str(changed)], substeps=5)
             assert historical["integration_policy"] == "fixed-5-v1"
             assert historical["integration_steps"] == historical["ticks"] * 5
             assert difference(fixed_result, historical) <= 1e-12

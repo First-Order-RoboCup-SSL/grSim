@@ -50,12 +50,14 @@ Copyright (C) 2011, Parsian Robotic Center (eew.aut.ac.ir/~parsian/grsim)
 class RobotsFormation;
 // Alternate values support controlled offline experiments without changing
 // networking or personal settings. Legacy friction is only a comparison mode.
+enum class IntegrationPolicy { Fixed, NearShellSix, Adaptive };
+
 struct PhysicsStepOptions {
-    unsigned substeps = 5; // Minimum integration steps per fixed tick.
+    unsigned substeps = 2; // Minimum; activity and predicted impacts select finer steps.
     unsigned quickStepIterations = 0;
     bool legacyBallFriction = false;
     bool finiteWheelRotation = false;
-    bool refineShellImpacts = true; // Nearby shells use at least six steps.
+    IntegrationPolicy integrationPolicy = IntegrationPolicy::Adaptive;
 };
 
 class SendingPacket {
@@ -84,6 +86,11 @@ private:
                             Robot *robot) ;
     void releaseBallHolds() const;
     bool shellsMayMeet(dReal frameStep) const;
+    unsigned adaptiveSubsteps(dReal frameStep, unsigned minimum);
+    dReal previousWheelSpeeds[MAX_ROBOT_COUNT*2][4]{};
+    dReal previousHorizontalVelocity[MAX_ROBOT_COUNT*2][2]{};
+    unsigned quietFrames = 0, resolutionDecayFrames = 0, adaptiveResolution = 5;
+    dReal adaptiveWarmupUntil = 1;
     void processTeleportBall(SimulatorResponse &simulatorResponse, const TeleportBall &teleBall) const;
     static void processTeleportRobot(const TeleportRobot &teleBot, Robot *robot);
 public:
