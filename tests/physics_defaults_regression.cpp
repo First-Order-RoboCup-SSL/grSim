@@ -297,8 +297,9 @@ void workerSettings(SimulationSettings settings)
             // readyRead normally drains synchronously through the worker; drain
             // explicitly as well if the platform deferred signal delivery.
             if (world->commandSocket->hasPendingDatagrams()) world->recvActions();
-            const double x = dBodyGetPosition(ball ? world->ball->body : world->robots[0]->chassis->body)[0];
-            require(std::abs(x - (ball ? 4 : -1.8)) < 1e-6, "legacy placement must actually reach the world");
+            const auto* position = dBodyGetPosition(ball ? world->ball->body : world->robots[0]->chassis->body);
+            require(std::abs(position[ball ? 1 : 0] - (ball ? -2 : -1.8)) < 1e-6,
+                    "legacy placement must actually reach the world");
             require(oneTick() >= 5, "legacy placement must restart fine settling");
         }
         std::puts("PASS modern/legacy and GUI placement/reset restart fine integration after settled motion");
