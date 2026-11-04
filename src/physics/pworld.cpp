@@ -338,6 +338,7 @@ PSurface* PWorld::findSurface(PObject* o1,PObject* o2)
 bool PWorld::step(dReal dt, unsigned quickStepIterations, StepStatistics* statistics)
 {
     activeStatistics = statistics;
+    if (statistics) ++statistics->integrationSteps;
     bool success = false;
     try {
         updateCollisionMasks();

@@ -31,6 +31,7 @@ class PWorld
 public:
     struct StepStatistics {
         unsigned contacts = 0;
+        unsigned integrationSteps = 0;
         double maxPenetration = 0;
         unsigned callbacks = 0, narrowPhaseCalls = 0, createdContacts = 0;
         bool measureTimings = false;

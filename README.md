@@ -167,14 +167,22 @@ bin/grSim_replay --replay /tmp/pushing.json --helpers 0 > /tmp/serial.json
 bin/grSim_replay --replay /tmp/pushing.json --helpers 3 > /tmp/workers.json
 ```
 
-Both fixture modes use six robots per side. For a bounded loopback command
+All fixture modes use six robots per side. `pushing-turning` and
+`pushing-turning-fast` add sustained pushing with alternating 2 and 4 rad/s
+turn commands for first-impact collision coverage. For a bounded loopback command
 capture, use `--record FILE --duration-ms 5000 --blue-port 10301 --yellow-port
 10302 --sim-port 10300`. The tool announces its ports, returns command feedback,
 and records command-watchdog expiry as explicit events. `--settings FILE` uses
 an existing grSim configuration when recording; replay reads its saved settings.
 The capture is a fresh headless physics session, with no vision publication,
 GUI edits, world configuration changes or arbitrary mid-match checkpoints.
-Replays retain the direct double-precision solver and five substeps. Compare
+Replays retain the direct double-precision solver. New v2 recordings store the
+integration policy. The default adaptive policy uses two steps for settled,
+distant motion, at least five during acceleration, turning, sliding or flight,
+and finer steps for predicted robot, ball and wall impacts. All bodies share
+the same evenly divided fixed tick; short settling guards avoid rapidly
+switching the resolution. Historical v1 recordings retain their fixed-five path; older binaries reject v2 rather than silently changing it.
+Compare
 numerical trajectories within a chosen tolerance across backends; identical
 bits on different CPUs are not promised.
 
@@ -207,6 +215,10 @@ Geometry and masses remain assumptions from Parsian; these logs do not measure
 them. Response is validated for the observed drives (up to 1 m/s) and turns
 (1–4 rad/s), not all possible commands.
 
+The radio 1 profile also uses 125 rad/s² angular speedup/braking limits, selected
+from comparisons that held out entire recordings. This is a fitted simulator
+control setting; it is not a direct measurement of hardware acceleration.
+
 Local/global body-velocity commands use separate forward/left gains and angular
 gain `AngularVelocityScale + AngularVelocityScaleSlope * abs(requested_turn)`.
 Teleport velocity targets and raw wheel-speed commands keep their existing meaning.
@@ -217,4 +229,4 @@ an external hardware-noise layer. Use one actuator-response model in the stack.
 
 For physics comparisons, `grSim_replay --replay FILE --checkpoint-every 1` saves
 every simulation tick. The default interval remains 30 ticks; diagnostics do not
-change the fixed timestep or five ODE substeps.
+change the fixed timestep or recorded integration policy.

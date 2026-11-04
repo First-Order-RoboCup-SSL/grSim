@@ -7,6 +7,7 @@
 #include "configwidget.h"
 #include "simulation.h"
 #include "sslworld.h"
+#include "grSim_Packet.pb.h"
 
 namespace {
 constexpr double tick = 1.0 / 60;
@@ -203,7 +204,8 @@ void workerSettings(SimulationSettings settings)
     settings.value_Robots_Count = 1;
     settings.value_CommandListenPort = settings.value_SimControlListenPort = 0;
     settings.value_BlueControlListenPort = settings.value_YellowControlListenPort = 0;
-    SimulationWorker worker(std::make_shared<SnapshotMailbox>());
+    auto mailbox = std::make_shared<SnapshotMailbox>();
+    SimulationWorker worker(mailbox);
     worker.start(settings);
     auto configure = [&](const SimulationSettings& next, bool rebuild) {
         SimulationSettingsEdit edit;
@@ -240,6 +242,67 @@ void workerSettings(SimulationSettings settings)
         configure(settings, false);
         checkBallSettings(*worker.findChild<SSLWorld*>(), settings);
         std::puts("PASS startup/live/rebuilt ball settings, radius changes and zero resistance");
+        auto* world = worker.findChild<SSLWorld*>();
+        auto oneTick = [&]() {
+            PWorld::StepStatistics statistics;
+            world->stepPhysics(tick, PhysicsStepOptions(), &statistics);
+            return statistics.integrationSteps;
+        };
+        auto settle = [&]() {
+            SimulationAction park;
+            park.kind = SimulationActionKind::PlaceBall;
+            park.generation = mailbox->latest()->generation;
+            park.x = 4; park.y = -3; park.z = settings.BallRadius();
+            worker.act(park);
+            for (int i = 0; i < 150; ++i) oneTick();
+            require(oneTick() == 2, "placement guard fixture must first reach two settled steps");
+        };
+        // These edits run through the real GUI/worker action entry point.
+        for (auto kind : {SimulationActionKind::PlaceRobot, SimulationActionKind::ResetRobot,
+                          SimulationActionKind::PlaceBall, SimulationActionKind::Formation}) {
+            settle();
+            SimulationAction action;
+            action.generation = mailbox->latest()->generation;
+            action.kind = kind;
+            action.robot = 0; action.team = 0; action.formation = FORMATION_INSIDE_1;
+            action.x = -2; action.y = 0; action.z = settings.BallRadius();
+            worker.act(action);
+            require(oneTick() >= 5, "GUI placement/reset must restart fine settling");
+        }
+        settle();
+        SimulatorCommand command;
+        auto* robot = command.mutable_control()->add_teleport_robot();
+        robot->mutable_id()->set_id(0); robot->mutable_id()->set_team(BLUE);
+        robot->set_x(-2); robot->set_y(0);
+        SimulatorResponse response;
+        world->processSimControl(command, response);
+        require(response.errors_size() == 0 && oneTick() >= 5, "modern robot teleport must restart fine settling");
+        for (bool ball : {false, true}) {
+            settle();
+            grSim_Packet packet;
+            if (ball) {
+                packet.mutable_replacement()->mutable_ball()->set_x(4);
+                packet.mutable_replacement()->mutable_ball()->set_y(-2);
+            } else {
+                auto* replacement = packet.mutable_replacement()->add_robots();
+                replacement->set_id(0); replacement->set_yellowteam(false);
+                replacement->set_x(-1.8); replacement->set_y(0); replacement->set_dir(0);
+            }
+            QUdpSocket sender;
+            const auto data = packet.SerializeAsString();
+            require(sender.writeDatagram(data.data(), int(data.size()), QHostAddress::LocalHost,
+                                         world->commandSocket->localPort()) == qint64(data.size()),
+                    "legacy placement datagram must be sent");
+            world->commandSocket->waitForReadyRead(1000);
+            // readyRead normally drains synchronously through the worker; drain
+            // explicitly as well if the platform deferred signal delivery.
+            if (world->commandSocket->hasPendingDatagrams()) world->recvActions();
+            const auto* position = dBodyGetPosition(ball ? world->ball->body : world->robots[0]->chassis->body);
+            require(std::abs(position[ball ? 1 : 0] - (ball ? -2 : -1.8)) < 1e-6,
+                    "legacy placement must actually reach the world");
+            require(oneTick() >= 5, "legacy placement must restart fine settling");
+        }
+        std::puts("PASS modern/legacy and GUI placement/reset restart fine integration after settled motion");
     } catch (...) { worker.stop(); throw; }
     worker.stop();
 }

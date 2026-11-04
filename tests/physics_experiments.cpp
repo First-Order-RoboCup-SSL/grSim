@@ -264,7 +264,8 @@ QJsonObject torqueExperiment(const SimulationSettings& settings, const Variant& 
 }
 
 QJsonObject runScenario(SimulationSettings settings, const Variant& variant, const QString& scenario,
-                        unsigned substeps, int requestedSteps, bool normalizeCompliance, double initialSpeed)
+                        unsigned substeps, int requestedSteps, bool normalizeCompliance, double initialSpeed,
+                        IntegrationPolicy integrationPolicy)
 {
     if (scenario == "torque-chassis" || scenario == "torque-wheel")
         return torqueExperiment(settings, variant, scenario == "torque-wheel", substeps);
@@ -279,6 +280,7 @@ QJsonObject runScenario(SimulationSettings settings, const Variant& variant, con
     std::vector<std::unique_ptr<WheelContact>> contexts;
     const double complianceScale=applyVariant(world, variant, contexts, substeps, normalizeCompliance);
     PhysicsStepOptions options;
+    options.integrationPolicy = integrationPolicy;
     options.substeps = substeps;
     options.quickStepIterations = variant.iterations;
     options.legacyBallFriction = variant.rollingScale == 0;
@@ -363,6 +365,7 @@ QJsonObject runScenario(SimulationSettings settings, const Variant& variant, con
         {"rms_joint_anchor_error_m", diagnostics.jointSamples ? std::sqrt(diagnostics.sumJointSquared/diagnostics.jointSamples) : 0},
         {"max_wheel_axis_error_deg", diagnostics.maxAxisDegrees},
         {"max_contact_penetration_m", contacts.maxPenetration}, {"detected_contacts",double(contacts.contacts)},
+        {"integration_steps",double(contacts.integrationSteps)},
         {"max_body_linear_speed_m_s", diagnostics.maxLinearSpeed}, {"max_body_angular_speed_rad_s",diagnostics.maxAngularSpeed},
         {"min_chassis_z_m",robots ? diagnostics.minChassisZ : 0}, {"ball_runout_x_m",position[0]+2},
         {"ball_stop_time_s",stopTime}, {"ball_first_rebound_height_m",firstBounceHeight},
@@ -411,10 +414,10 @@ int main(int argc,char** argv)
 {
     QApplication app(argc,argv);
     QString variantName="baseline", scenario="ball-flight";
-    QString settingsFile;
+    QString settingsFile, integrationPolicyName;
     double rollingDeceleration = -1, initialSpeed = 2;
     unsigned substeps=5, seed=166;
-    bool normalizeCompliance=false;
+    bool normalizeCompliance=false, explicitSubsteps=false;
     int steps=0;
     for (int i=1; i<argc; ++i) {
         if (i+1>=argc) return 2;
@@ -423,6 +426,7 @@ int main(int argc,char** argv)
         if (option=="--variant") variantName=value;
         else if (option=="--scenario") scenario=value;
         else if (option=="--settings-file") settingsFile=value;
+        else if (option=="--integration-policy") integrationPolicyName=value;
         else if (option=="--rolling-deceleration" || option=="--ball-speed") {
             bool valid = false;
             const double number = value.toDouble(&valid);
@@ -434,7 +438,7 @@ int main(int argc,char** argv)
             bool valid=false;
             const unsigned number=value.toUInt(&valid);
             if (!valid) return 2;
-            if (option=="--substeps") substeps=number;
+            if (option=="--substeps") { substeps=number; explicitSubsteps=true; }
             else if (option=="--steps") steps=number;
             else if (option=="--seed") seed=number;
             else if (option=="--normalize-contact-stiffness") normalizeCompliance=number != 0;
@@ -444,6 +448,15 @@ int main(int argc,char** argv)
     const QStringList scenarios={"ball-flight","ball-rolling","ball-sliding","ball-spin","ball-drop",
         "torque-chassis","torque-wheel","robot-drive","robot-turn","robot-rest","crowded-contact",
         "perf-11","perf-16","perf-crowded"};
+    if (integrationPolicyName.isEmpty())
+        integrationPolicyName = variantName == "system" && !explicitSubsteps && !scenario.startsWith("torque-")
+            ? "adaptive" : "fixed";
+    if (integrationPolicyName != "adaptive" && integrationPolicyName != "fixed" && integrationPolicyName != "near-shell-six") return 2;
+    const auto integrationPolicy = integrationPolicyName == "adaptive" ? IntegrationPolicy::Adaptive :
+        (integrationPolicyName == "near-shell-six" ? IntegrationPolicy::NearShellSix : IntegrationPolicy::Fixed);
+    if (!explicitSubsteps && integrationPolicy == IntegrationPolicy::Adaptive) substeps = PhysicsStepOptions().substeps;
+    if (normalizeCompliance && integrationPolicy != IntegrationPolicy::Fixed) return 2;
+    if (scenario.startsWith("torque-") && integrationPolicy != IntegrationPolicy::Fixed) return 2;
     if (!substeps || substeps>120 || !scenarios.contains(scenario)) return 2;
     ConfigWidget config(false, settingsFile);
     auto settings = config.simulationSettings();
@@ -451,12 +464,12 @@ int main(int argc,char** argv)
     if (!dInitODE2(dInitFlagManualThreadCleanup) || !dAllocateODEDataForThread(dAllocateMaskAll)) return 2;
     int status=0;
     QJsonObject output{{"collision_model","chassis-hull-2026"}, {"variant",variantName}, {"scenario",scenario}, {"seed",int(seed)},
-        {"substeps",int(substeps)}, {"normalized_contact_stiffness",normalizeCompliance},
+        {"substeps",int(substeps)}, {"integration_policy",integrationPolicyName}, {"normalized_contact_stiffness",normalizeCompliance},
         {"ode_version",QString::fromLatin1(dODE_VERSION)}};
     try {
         dRandSetSeed(seed);
         const auto result=runScenario(settings, variantFor(variantName), scenario, substeps, steps,
-                                      normalizeCompliance, initialSpeed);
+                                      normalizeCompliance, initialSpeed, integrationPolicy);
         for (auto i=result.begin(); i!=result.end(); ++i) output[i.key()]=i.value();
         output["success"]=true;
     } catch (const std::exception& error) {

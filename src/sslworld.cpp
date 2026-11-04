@@ -407,12 +407,170 @@ void SSLWorld::stepSimulation(dReal dt) {
     frame_num ++;
 }
 
+bool SSLWorld::shellsMayMeet(dReal frameStep) const
+{
+    // A frame of lookahead plus 5cm makes the refinement decision before
+    // first impact, rather than switching on an existing contact's depth.
+    const int count = cfg->Robots_Count() * 2;
+    for (int first = 0; first < count; ++first) {
+        const auto* p1 = dGeomGetPosition(robots[first]->dummy->geom);
+        const auto* v1 = dBodyGetLinearVel(robots[first]->chassis->body);
+        const dReal speed1 = std::sqrt(v1[0]*v1[0] + v1[1]*v1[1] + v1[2]*v1[2]);
+        for (int second = first + 1; second < count; ++second) {
+            const auto* v2 = dBodyGetLinearVel(robots[second]->chassis->body);
+            const dReal speed2 = std::sqrt(v2[0]*v2[0] + v2[1]*v2[1] + v2[2]*v2[2]);
+            const dReal reach = robots[first]->settings.RobotRadius +
+                robots[second]->settings.RobotRadius + 0.05 + frameStep*(speed1 + speed2);
+            const auto* p2 = dGeomGetPosition(robots[second]->dummy->geom);
+            dReal distanceSquared = 0;
+            for (int axis = 0; axis < 3; ++axis) {
+                const dReal separation = p1[axis] - p2[axis];
+                distanceSquared += separation * separation;
+            }
+            if (distanceSquared <= reach * reach) return true;
+        }
+    }
+    return false;
+}
+
+void SSLWorld::restartIntegrationSettling()
+{
+    adaptiveWarmupUntil = sim_time + 1;
+    quietFrames = resolutionDecayFrames = 0;
+    adaptiveResolution = 5;
+}
+
+unsigned SSLWorld::adaptiveSubsteps(dReal frameStep, unsigned minimum)
+{
+    constexpr unsigned normalSteps = 5;
+    constexpr dReal travelBudget = 0.001;
+    constexpr dReal contactMargin = 0.005;
+    unsigned required = minimum;
+    bool changingMotion = sim_time < adaptiveWarmupUntil;
+    const int count = cfg->Robots_Count() * 2;
+    for (int robot = 0; robot < count; ++robot) {
+        for (int wheel = 0; wheel < 4; ++wheel) {
+            const dReal target = robots[robot]->getSpeed(wheel);
+            changingMotion |= std::abs(target-previousWheelSpeeds[robot][wheel]) > 0.001;
+            previousWheelSpeeds[robot][wheel] = target;
+        }
+        const auto* v = dBodyGetLinearVel(robots[robot]->chassis->body);
+        const auto* w = dBodyGetAngularVel(robots[robot]->chassis->body);
+        for (int axis = 0; axis < 2; ++axis) {
+            changingMotion |= std::abs(v[axis]-previousHorizontalVelocity[robot][axis]) > frameStep*0.1;
+            previousHorizontalVelocity[robot][axis] = v[axis];
+        }
+        changingMotion |= std::abs(v[2]) > 0.02 ||
+            std::max({std::abs(w[0]), std::abs(w[1]), std::abs(w[2])}) > 0.05;
+    }
+    quietFrames = changingMotion ? 0 : std::min(quietFrames+1, 6u);
+    if (quietFrames < 6) required = std::max(required, normalSteps);
+    // One shared, even subdivision for the entire fixed tick. Predict impacts
+    // using relative motion and a bounded acceleration allowance.
+    auto impact = [&](dReal gap, dReal closing, dReal acceleration) {
+        closing = std::max(dReal(0), closing);
+        const dReal travel = frameStep*(closing + acceleration*frameStep);
+        if (gap > contactMargin + travel) return;
+        required = std::max(required, normalSteps);
+        if (gap > travel + travelBudget) return;
+        const dReal needed = std::ceil(travel/travelBudget);
+        const unsigned bounded = unsigned(std::min(dReal(64), std::max(dReal(1), needed)));
+        for (unsigned level : {5u, 8u, 12u, 20u, 32u, 64u})
+            if (level >= bounded) { required = std::max(required, level); break; }
+    };
+    for (int first = 0; first < count; ++first) {
+        const auto* p1 = dGeomGetPosition(robots[first]->dummy->geom);
+        const auto* v1 = dBodyGetLinearVel(robots[first]->chassis->body);
+        const auto* w1 = dBodyGetAngularVel(robots[first]->chassis->body);
+        for (int second = first+1; second < count; ++second) {
+            const auto* p2 = dGeomGetPosition(robots[second]->dummy->geom);
+            const auto* v2 = dBodyGetLinearVel(robots[second]->chassis->body);
+            const auto* w2 = dBodyGetAngularVel(robots[second]->chassis->body);
+            dReal squared = 0, relative = 0;
+            for (int axis = 0; axis < 3; ++axis) {
+                const dReal d = p1[axis]-p2[axis];
+                squared += d*d; relative += d*(v1[axis]-v2[axis]);
+            }
+            const dReal distance = std::sqrt(squared);
+            if (distance <= 0) { required = std::max(required, 20u); continue; }
+            const dReal a1 = robots[first]->settings.AccSpeedupAbsoluteMax +
+                std::hypot(v1[0],v1[1])*std::abs(w1[2]);
+            const dReal a2 = robots[second]->settings.AccSpeedupAbsoluteMax +
+                std::hypot(v2[0],v2[1])*std::abs(w2[2]);
+            impact(distance-robots[first]->settings.RobotRadius-robots[second]->settings.RobotRadius,
+                   -relative/distance, a1+a2);
+        }
+    }
+    const auto* bp = dGeomGetPosition(ball->geom);
+    const auto* bv = dBodyGetLinearVel(ball->body);
+    const auto* bw = dBodyGetAngularVel(ball->body);
+    const dReal radius = cfg->BallRadius();
+    // Airborne/sliding balls keep the baseline; settled rolling was validated
+    // separately. Floor impact and nearby robots/walls can demand finer steps.
+    if (bp[2] > radius+0.001 || std::abs(bv[2]) > 0.01 ||
+        std::hypot(bv[0]-bw[1]*radius, bv[1]+bw[0]*radius) > 0.01)
+        required = std::max(required, normalSteps);
+    if (bv[2] < -0.01 || bp[2] > radius+0.001)
+        impact(bp[2]-radius, -bv[2], cfg->Gravity());
+    for (int robot = 0; robot < count; ++robot) {
+        const auto* p = dGeomGetPosition(robots[robot]->dummy->geom);
+        const auto* v = dBodyGetLinearVel(robots[robot]->chassis->body);
+        const auto* w = dBodyGetAngularVel(robots[robot]->chassis->body);
+        // The hull is a cylinder, not the shell-contact sphere: use its
+        // horizontal radius conservatively even for low ball contacts.
+        dReal squared = 0, relative = 0;
+        for (int axis = 0; axis < 2; ++axis) {
+            const dReal d = bp[axis]-p[axis]; squared += d*d;
+            relative += d*(bv[axis]-v[axis]);
+        }
+        const dReal distance = std::sqrt(squared);
+        if (distance > 0)
+            impact(distance-radius-robots[robot]->settings.RobotRadius,
+                   -relative/distance + robots[robot]->settings.RobotRadius*std::abs(w[2]),
+                   robots[robot]->settings.AccSpeedupAbsoluteMax);
+    }
+    for (auto* wall : walls) {
+        dReal bounds[6];
+        dGeomGetAABB(wall->geom, bounds);
+        auto wallImpact = [&](const dReal* position, const dReal* velocity,
+                              dReal bodyRadius, dReal acceleration) {
+            dReal squared = 0, relative = 0;
+            for (int axis = 0; axis < 3; ++axis) {
+                const dReal nearest = std::max(bounds[2*axis], std::min(position[axis], bounds[2*axis+1]));
+                const dReal distance = position[axis]-nearest;
+                squared += distance*distance;
+                relative += distance*velocity[axis];
+            }
+            const dReal distance = std::sqrt(squared);
+            if (distance > 0) impact(distance-bodyRadius, -relative/distance, acceleration);
+            else required = std::max(required, 20u);
+        };
+        wallImpact(bp, bv, radius, 0);
+        for (int robot = 0; robot < count; ++robot)
+            wallImpact(dGeomGetPosition(robots[robot]->dummy->geom),
+                       dBodyGetLinearVel(robots[robot]->chassis->body),
+                       robots[robot]->settings.RobotRadius, robots[robot]->settings.AccSpeedupAbsoluteMax);
+    }
+    if (required >= adaptiveResolution) {
+        adaptiveResolution = required; resolutionDecayFrames = 0;
+    } else if (++resolutionDecayFrames >= 2) {
+        adaptiveResolution = required; resolutionDecayFrames = 0;
+    }
+    return adaptiveResolution;
+}
+
 void SSLWorld::stepPhysics(dReal dt, const PhysicsStepOptions& options,
                           PWorld::StepStatistics* statistics) {
     if (!std::isfinite(dt) || dt <= 0 || !options.substeps)
         throw std::invalid_argument("Invalid physics timestep");
     legacyBallFrictionActive = options.legacyBallFriction;
-    for (unsigned kk=0; kk < options.substeps; ++kk) {
+    // Every body shares one even subdivision of the fixed tick. Historical
+    // policies remain explicit so saved recordings keep their original physics.
+    const unsigned substeps = options.integrationPolicy == IntegrationPolicy::Adaptive
+        ? adaptiveSubsteps(dt, options.substeps)
+        : (options.integrationPolicy == IntegrationPolicy::NearShellSix && shellsMayMeet(dt)
+            ? std::max(options.substeps, 6u) : options.substeps);
+    for (unsigned kk=0; kk < substeps; ++kk) {
         if (options.finiteWheelRotation) {
             for (int k=0; k < cfg->Robots_Count() * 2; ++k) {
                 for (auto* wheel : robots[k]->wheels) {
@@ -442,7 +600,7 @@ void SSLWorld::stepPhysics(dReal dt, const PhysicsStepOptions& options,
                 dBodySetLinearVel(ball->body, 0, 0, 0);
             }
         }
-        if (!p->step(dt/options.substeps, options.quickStepIterations, statistics))
+        if (!p->step(dt/substeps, options.quickStepIterations, statistics))
             throw std::runtime_error("ODE physics step failed");
     }
 
@@ -548,6 +706,7 @@ void SSLWorld::recvActions() {
                 }
             }
             if (grSimPacket.has_replacement()) {
+                bool replaced = false;
                 for (int i=0; i < grSimPacket.replacement().robots_size(); i++) {
                     int team = 0;
                     if (grSimPacket.replacement().robots(i).has_yellowteam() && grSimPacket.replacement().robots(i).yellowteam()) team = 1;
@@ -566,6 +725,7 @@ void SSLWorld::recvActions() {
                     robots[id]->resetRobot();
                     robots[id]->setDir(dir);
                     robots[id]->on = turn_on;
+                    replaced = true;
                 }
                 if (grSimPacket.replacement().has_ball()) {
                     dReal x = 0, y = 0, z = 0, vx = 0, vy = 0;
@@ -583,7 +743,9 @@ void SSLWorld::recvActions() {
                     ball->setBodyPosition(x,y,cfg->BallRadius()*1.2);
                     dBodySetLinearVel(ball->body,vx,vy,0);
                     dBodySetAngularVel(ball->body,0,0,0);
+                    replaced = true;
                 }
+                if (replaced) restartIntegrationSettling();
             }
         }
 
@@ -667,10 +829,12 @@ void SSLWorld::yellowControlSocketReady() {
 
 
 void SSLWorld::processSimControl(const SimulatorCommand &simulatorCommand, SimulatorResponse &simulatorResponse) {
+    bool teleported = false;
     if(simulatorCommand.has_control()) {
         if(simulatorCommand.control().has_teleport_ball()) {
             auto teleBall = simulatorCommand.control().teleport_ball();
             processTeleportBall(simulatorResponse, teleBall);
+            teleported = true;
         }
         
         for(const auto &teleBot : simulatorCommand.control().teleport_robot()) {
@@ -681,8 +845,10 @@ void SSLWorld::processSimControl(const SimulatorCommand &simulatorCommand, Simul
             auto robot = robots[id];
 
             processTeleportRobot(teleBot, robot);
+            teleported = true;
         }
     }
+    if (teleported) restartIntegrationSettling();
 
     if (simulatorCommand.has_config()) {
         if (simulatorCommand.config().has_geometry()
@@ -1026,7 +1192,10 @@ SSL_WrapperPacket* SSLWorld::generatePacket(int cam_id) {
             dir = robots[i]->getDir(k);
 
             // reset when the robot has turned over
-            if (cfg->ResetTurnOver() && k < 0.9) robots[i]->resetRobot();
+            if (cfg->ResetTurnOver() && k < 0.9) {
+                robots[i]->resetRobot();
+                restartIntegrationSettling();
+            }
 
             if (visibleInCam(cam_id, x, y)) {
                 SSL_DetectionRobot* rob = (is_blue) ? pPacket->mutable_detection()->add_robots_blue()

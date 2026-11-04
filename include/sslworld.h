@@ -50,11 +50,14 @@ Copyright (C) 2011, Parsian Robotic Center (eew.aut.ac.ir/~parsian/grsim)
 class RobotsFormation;
 // Alternate values support controlled offline experiments without changing
 // networking or personal settings. Legacy friction is only a comparison mode.
+enum class IntegrationPolicy { Fixed, NearShellSix, Adaptive };
+
 struct PhysicsStepOptions {
-    unsigned substeps = 5;
+    unsigned substeps = 2; // Minimum; activity and predicted impacts select finer steps.
     unsigned quickStepIterations = 0;
     bool legacyBallFriction = false;
     bool finiteWheelRotation = false;
+    IntegrationPolicy integrationPolicy = IntegrationPolicy::Adaptive;
 };
 
 class SendingPacket {
@@ -82,6 +85,12 @@ private:
     static void processMoveCommand(RobotControlResponse &robotControlResponse, const RobotMoveCommand &robotCommand,
                             Robot *robot) ;
     void releaseBallHolds() const;
+    bool shellsMayMeet(dReal frameStep) const;
+    unsigned adaptiveSubsteps(dReal frameStep, unsigned minimum);
+    dReal previousWheelSpeeds[MAX_ROBOT_COUNT*2][4]{};
+    dReal previousHorizontalVelocity[MAX_ROBOT_COUNT*2][2]{};
+    unsigned quietFrames = 0, resolutionDecayFrames = 0, adaptiveResolution = 5;
+    dReal adaptiveWarmupUntil = 1;
     void processTeleportBall(SimulatorResponse &simulatorResponse, const TeleportBall &teleBall) const;
     static void processTeleportRobot(const TeleportRobot &teleBot, Robot *robot);
 public:
@@ -96,6 +105,8 @@ public:
                      PWorld::StepStatistics* statistics = nullptr);
     // Apply the same ball material, mass and optional damping on startup/edit.
     void updateBallPhysics();
+    // Restart fine integration after any externally applied pose/reset edit.
+    void restartIntegrationSettling();
     std::shared_ptr<SceneSnapshot> snapshot(quint64 generation) const;
     SSL_WrapperPacket* generatePacket(int cam_id=0);
     void addFieldLinesArcs(SSL_GeometryFieldSize *field);
