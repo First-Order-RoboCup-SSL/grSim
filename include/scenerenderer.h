@@ -9,7 +9,9 @@ struct RenderQuality {
     bool lowSpec;
     bool showSkybox;
     bool showRobotLabels;
-    static RenderQuality forLowSpec(bool enabled) { return {enabled, !enabled, !enabled}; }
+    static RenderQuality forLowSpec(bool enabled, bool showSkybox) {
+        return {enabled, showSkybox, !enabled};
+    }
 };
 
 class SceneRenderer {

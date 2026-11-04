@@ -160,6 +160,7 @@ public:
   DEF_VALUE(double,Double,DesiredFPS)
   DEF_VALUE(double,Double,DeltaTime)
   DEF_VALUE(bool,Bool,LowSpecMode)
+  DEF_VALUE(bool,Bool,ShowSkybox)
   DEF_VALUE(int,Int,sendGeometryEvery)
   DEF_VALUE(double,Double,Gravity)
   DEF_VALUE(bool,Bool,ResetTurnOver)

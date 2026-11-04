@@ -157,6 +157,9 @@ ConfigWidget::ConfigWidget(bool persist, const QString& settingsPath)
         ADD_VALUE(worldp_vars,Double,Gravity,9.81,"Gravity")
         ADD_VALUE(worldp_vars,Bool,ResetTurnOver,true,"Auto reset turn-over")
         ADD_VALUE(worldp_vars,Bool,LowSpecMode,false,"Low Spec Mode")
+        // The renderer reads this option directly on each frame.
+        v_ShowSkybox = std::make_shared<VarTypes::VarBool>("Show Skybox", false);
+        worldp_vars->addChild(v_ShowSkybox);
   VarListPtr ballp_vars(new VarList("Ball"));
     phys_vars->addChild(ballp_vars);
         ADD_VALUE(ballp_vars,Double,BallMass,0.043,"Ball mass");
