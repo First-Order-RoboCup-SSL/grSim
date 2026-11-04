@@ -42,7 +42,10 @@ int main(int argc, char** argv)
     VarXML::write(physics, path.toStdString());
     bool passed = true;
     {
+        int simulationEdits = 0;
         ConfigWidget config(true, path);
+        passed = check(!config.ShowSkybox(),
+                       "skybox defaults off when older settings omit the option") && passed;
         passed = check(config.DesiredFPS() == 7.0 && config.DeltaTime() == 0.008,
                        "legacy timing values load into the active controls") && passed;
         const auto settings = config.simulationSettings();
@@ -50,6 +53,11 @@ int main(int argc, char** argv)
                        "saved timestep reaches copied simulation settings") && passed;
         config.v_DesiredFPS->setDouble(13);
         config.v_DeltaTime->setDouble(0.01);
+        QObject::connect(&config, &ConfigWidget::settingsEdited, &config, [&]() { ++simulationEdits; });
+        config.v_ShowSkybox->setBool(true);
+        emit config.v_ShowSkybox->wasEdited(config.v_ShowSkybox);
+        QCoreApplication::processEvents();
+        passed = check(simulationEdits == 0, "editing the skybox leaves the simulation configuration alone") && passed;
     }
     QFile saved(path);
     if (!saved.open(QIODevice::ReadOnly)) return 2;
@@ -61,10 +69,20 @@ int main(int argc, char** argv)
                    "timing edits update the original keys without inactive duplicates") && passed;
     passed = check(!xml.contains("Synchronize ODE with OpenGL"),
                    "obsolete synchronization control is removed from saved settings") && passed;
+    passed = check(xml.count("name=\"Show Skybox\"") == 1,
+                   "skybox has one persistent settings entry") && passed;
     {
         ConfigWidget config(true, path);
         passed = check(config.DesiredFPS() == 13 && config.DeltaTime() == 0.01,
                        "edited timing values survive a settings round trip") && passed;
+        passed = check(config.ShowSkybox(),
+                       "enabled skybox survives a settings round trip") && passed;
+        config.v_ShowSkybox->setBool(false);
+    }
+    {
+        ConfigWidget config(false, path);
+        passed = check(!config.ShowSkybox(),
+                       "disabled skybox survives a settings round trip") && passed;
     }
     auto renamedPhysics = std::make_shared<VarList>("Physics");
     auto renamedWorld = std::make_shared<VarList>("World");

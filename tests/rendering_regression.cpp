@@ -4,6 +4,7 @@
 #include <QElapsedTimer>
 #include <QThread>
 #include <QWindow>
+#include <QMouseEvent>
 #include <cstdio>
 #include <cstdlib>
 #include <set>
@@ -95,8 +96,7 @@ static bool checkTexturedCylinderDetail(GLWidget& view)
             GLfloat feedback[16384];
             glFeedbackBuffer(16384, GL_3D, feedback);
             glRenderMode(GL_FEEDBACK);
-            auto quality = RenderQuality::forLowSpec(low);
-            quality.showSkybox = false;
+            const auto quality = RenderQuality::forLowSpec(low, false);
             renderer.draw(fixture, 512, 512, quality, -1, false, {{0, 0, 0}}, 0);
             return glRenderMode(GL_RENDER);
         };
@@ -107,6 +107,31 @@ static bool checkTexturedCylinderDetail(GLWidget& view)
         passed = reduced && passed;
     }
     renderer.graphics.clearTextures();
+    return passed;
+}
+
+static bool checkSkyboxToggle(ConfigWidget* config, SimulationController* simulation)
+{
+    TestView view(config, simulation);
+    view.resize(320, 240);
+    // Look above the horizon so the sky cannot be hidden behind the ground.
+    QMouseEvent lookUp(QEvent::MouseMove, QPointF(0, -240), Qt::NoButton,
+                       Qt::LeftButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(&view, &lookUp);
+    bool passed = true;
+    for (bool low : {false, true}) {
+        config->v_LowSpecMode->setBool(low);
+        auto capture = [&](bool skybox) {
+            config->v_ShowSkybox->setBool(skybox);
+            return view.renderPixmap(320, 240, false).toImage().convertToFormat(QImage::Format_RGB32);
+        };
+        const QImage off = capture(false), on = capture(true), offAgain = capture(false);
+        const bool toggles = !off.isNull() && !on.isNull() && off != on && off == offAgain;
+        std::printf("%s skybox switches off/on/off while rendering low=%d\n",
+                    toggles ? "PASS" : "FAIL", low);
+        passed = toggles && passed;
+    }
+    config->v_LowSpecMode->setBool(false);
     return passed;
 }
 
@@ -272,6 +297,7 @@ int main(int argc, char** argv)
         return passed ? 0 : 1;
     }
     bool passed = true;
+    passed = checkSkyboxToggle(config, view->simulation) && passed;
     passed = checkTexturedCylinderDetail(*view) && passed;
     for (const QSize size : {QSize(512, 512), QSize(320, 240)}) {
         passed = checkCapture(*view, false, size) && passed;

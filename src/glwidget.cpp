@@ -524,7 +524,7 @@ void GLWidget::paintGL()
         const auto& ball = snapshot->ballPosition;
         graphics.lookAt(ball[0], ball[1], ball[2]);
     }
-    const auto quality = RenderQuality::forLowSpec(cfg->LowSpecMode());
+    const auto quality = RenderQuality::forLowSpec(cfg->LowSpecMode(), cfg->ShowSkybox());
     GLint viewport[4];
     glGetIntegerv(GL_VIEWPORT, viewport);
     const int fullW = qMax(1, viewport[2]), fullH = qMax(1, viewport[3]);
